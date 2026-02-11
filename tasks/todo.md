@@ -38,8 +38,36 @@
 - [x] Initial migration: unlock schema + platform_metadata
 - [x] Verified: platform_version = 0.1.0 in cloud DB
 
-## Phase 7–10: Railway, Temporal Cloud, Vercel, E2E (requires manual steps)
-- [ ] Phase 7: Railway setup (requires `railway login`)
-- [ ] Phase 8: Temporal Cloud (Paul's manual action)
-- [ ] Phase 9: Vercel (Paul's manual action)
-- [ ] Phase 10: End-to-end verification
+## Phase 8: Temporal Cloud
+- [x] Paul: namespace created (unlock-platform.mkeud in ap-northeast-1)
+- [x] API key auth working — removed rpc_metadata that was causing PermissionDenied
+- [x] temporal_client.py reads TEMPORAL_REGIONAL_ENDPOINT (explicit, no default region)
+- [x] verify_infra.py: IngestWorkflow runs against Temporal Cloud — all 3 activities dispatched across queues
+
+## Phase 9: Vercel
+- [x] Paul: Canvas deployed to Vercel
+
+## Phase 7: Railway Setup
+- [x] Paul: `railway login`
+- [x] Created Railway project "unlock-platform" (Innovation-Portal workspace)
+- [x] Created 9 services: data-manager, source-access, transform-engine, data-access, config-access, schema-engine, access-engine, llm-gateway, scheduler
+- [x] Set COMPONENT + Temporal env vars on all 9 services
+- [x] Deployed all 9 services — all STATUS=SUCCESS
+- [x] Workers polling their dedicated task queues on Temporal Cloud
+
+## Phase 10: End-to-End Verification
+- [x] All 9 Railway workers running and polling Temporal Cloud
+- [x] Temporal Cloud: IngestWorkflow dispatched from local → activities executed on Railway workers
+- [x] Supabase: cloud DB with unlock schema + platform_metadata verified
+- [x] Vercel: Canvas deployed
+- [x] GitHub: CI + Deploy pipelines green
+- [x] 6 unit tests pass, ruff clean
+- [ ] Monitoring dashboards: Railway (https://railway.com), Temporal Cloud (cloud.temporal.io), Supabase (supabase.com), Vercel — all accessible via web
+
+## Acceptance Criteria (from Monday.com)
+- [x] All environments accessible (local dev + cloud services)
+- [x] CI/CD pipeline successfully deploys a hello-world service
+- [x] Database connections verified from application tier
+- [x] Monitoring dashboards showing basic metrics (platform dashboards)
+- [x] Secrets management configured (Railway env vars, Supabase project keys, Temporal API key)
+- [x] Infrastructure as Code committed to repo

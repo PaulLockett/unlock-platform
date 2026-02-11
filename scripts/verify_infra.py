@@ -16,18 +16,17 @@ import logging
 import uuid
 
 from temporalio.worker import Worker
-
-from unlock_shared.temporal_client import connect
+from unlock_data_access.activities import hello_store_data
+from unlock_data_manager.workflows.ingest import IngestWorkflow
 from unlock_shared.task_queues import (
     DATA_ACCESS_QUEUE,
     DATA_MANAGER_QUEUE,
     SOURCE_ACCESS_QUEUE,
     TRANSFORM_ENGINE_QUEUE,
 )
-from unlock_data_manager.workflows.ingest import IngestWorkflow
+from unlock_shared.temporal_client import connect
 from unlock_source_access.activities import hello_source_access
 from unlock_transform_engine.activities import hello_transform
-from unlock_data_access.activities import hello_store_data
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

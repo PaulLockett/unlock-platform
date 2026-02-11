@@ -14,8 +14,7 @@ build/
 venv/
 ENV/
 
-# uv
-uv.lock
+# uv — uv.lock is committed (like package-lock.json) for reproducible builds
 
 # IDE
 .vscode/

@@ -1,11 +1,11 @@
 """Worker runner entrypoint.
 
-Usage: python -m unlock_workers.runner <component-name>
+Usage:
+  python -m unlock_workers.runner <component-name>
+  COMPONENT=source-access python -m unlock_workers.runner
 
-Each Railway service runs the same Docker image with a different CMD argument:
-  CMD ["python", "-m", "unlock_workers.runner", "source-access"]
-  CMD ["python", "-m", "unlock_workers.runner", "data-manager"]
-  etc.
+Each Railway service sets a COMPONENT environment variable to select which
+component to run. CLI argument takes precedence over COMPONENT env var.
 
 This starts a Temporal worker that polls the component's dedicated task queue,
 registering only that component's workflows and/or activities. The worker runs
@@ -14,6 +14,7 @@ until interrupted (SIGINT/SIGTERM), which Railway handles during deployments.
 
 import asyncio
 import logging
+import os
 import sys
 
 from temporalio.worker import Worker
@@ -51,13 +52,18 @@ async def run_worker(component_name: str) -> None:
 
 
 def main() -> None:
-    """CLI entrypoint — parse the component name and start the worker."""
-    if len(sys.argv) != 2:
+    """CLI entrypoint — parse the component name and start the worker.
+
+    Precedence: CLI argument > COMPONENT env var.
+    """
+    component_name = sys.argv[1] if len(sys.argv) >= 2 else os.environ.get("COMPONENT", "")
+
+    if not component_name:
         print("Usage: python -m unlock_workers.runner <component>")
+        print("  or: COMPONENT=<component> python -m unlock_workers.runner")
         print(f"Components: {', '.join(sorted(COMPONENTS.keys()))}")
         sys.exit(1)
 
-    component_name = sys.argv[1]
     asyncio.run(run_worker(component_name))
 
 
