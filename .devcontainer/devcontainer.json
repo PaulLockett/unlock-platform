@@ -1,0 +1,49 @@
+{
+  "name": "Unlock Alabama Data Platform",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "devcontainer",
+  "workspaceFolder": "/workspace",
+
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.12"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    }
+  },
+
+  "forwardPorts": [
+    7233,
+    8233,
+    54322,
+    3000
+  ],
+  "portsAttributes": {
+    "7233":  { "label": "Temporal gRPC" },
+    "8233":  { "label": "Temporal UI" },
+    "54322": { "label": "PostgreSQL" },
+    "3000":  { "label": "Next.js Canvas" }
+  },
+
+  "postCreateCommand": "pip install uv && uv sync && cd apps/canvas && npm install",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker",
+        "dbaeumer.vscode-eslint",
+        "bradlc.vscode-tailwindcss"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        }
+      }
+    }
+  }
+}

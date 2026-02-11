@@ -1,0 +1,37 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Only one deploy at a time — cancel in-progress if a new push arrives
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Gate — run CI first
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy to production
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Supabase migrations
+      # TODO: Uncomment when Supabase project is created
+      # - name: Install Supabase CLI
+      #   uses: supabase/setup-cli@v1
+      # - name: Push migrations
+      #   run: supabase db push
+      #   env:
+      #     SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      #     SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      # Railway and Vercel auto-deploy from main via their GitHub integrations.
+      # No explicit deploy step needed here — just ensure CI passes first.
+      - name: Deploy marker
+        run: echo "CI passed — Railway and Vercel will auto-deploy from main"

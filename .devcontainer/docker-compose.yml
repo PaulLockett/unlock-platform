@@ -1,0 +1,38 @@
+# Local development stack: Temporal dev server + PostgreSQL.
+#
+# The devcontainer service is what Cursor/VS Code attaches to.
+# Temporal and Postgres run as sidecar services so the full stack
+# is available from within the dev container.
+
+services:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/base:ubuntu
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
+    depends_on:
+      - temporal
+      - postgres
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    ports:
+      - "7233:7233"   # gRPC — workers connect here
+      - "8233:8233"   # Web UI — http://localhost:8233
+    environment:
+      - DB=sqlite
+      - TEMPORAL_UI_ENABLED=true
+
+  postgres:
+    image: postgres:16
+    ports:
+      - "54322:5432"   # Matches Supabase convention (54322)
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
