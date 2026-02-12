@@ -14,6 +14,7 @@ def test_all_components_registered() -> None:
         "schema-engine",
         "access-engine",
         "llm-gateway",
+        "scheduler",
     }
     assert set(COMPONENTS.keys()) == expected
 
@@ -27,11 +28,27 @@ def test_data_manager_has_workflows_no_activities() -> None:
 
 def test_activity_components_have_no_workflows() -> None:
     """Activity components should not register workflows."""
+    # Scheduler is a stub — no activities yet
+    stub_components = {"scheduler"}
     for name, config in COMPONENTS.items():
         if name == "data-manager":
             continue
         assert len(config.workflows) == 0, f"{name} should not have workflows"
-        assert len(config.activities) >= 1, f"{name} should have at least one activity"
+        if name not in stub_components:
+            assert len(config.activities) >= 1, f"{name} should have at least one activity"
+
+
+def test_source_access_has_four_activities() -> None:
+    """Source Access should register all four real activities."""
+    sa = COMPONENTS["source-access"]
+    assert len(sa.activities) == 4
+    activity_names = {a.__name__ for a in sa.activities}
+    assert activity_names == {
+        "connect_source",
+        "fetch_source_data",
+        "test_connection",
+        "get_source_schema",
+    }
 
 
 def test_each_component_has_unique_queue() -> None:

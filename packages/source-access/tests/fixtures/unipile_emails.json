@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "id": "email-001",
+      "account_id": "acc-789",
+      "subject": "Partnership opportunity for Unlock Alabama",
+      "from": {"address": "partner@example.com", "name": "Jane Doe"},
+      "to": [{"address": "team@unlockalabama.org", "name": "Unlock Team"}],
+      "cc": [],
+      "date": "2024-12-01T09:00:00Z",
+      "body": {"plain": "Hi, we'd love to discuss...", "html": "<p>Hi, we'd love to discuss...</p>"},
+      "is_read": true,
+      "folder": "INBOX",
+      "attachments": []
+    }
+  ],
+  "pagination": {
+    "cursor": null,
+    "has_more": false
+  }
+}

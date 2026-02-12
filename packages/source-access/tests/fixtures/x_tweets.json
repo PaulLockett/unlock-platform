@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "id": "1234567890",
+      "text": "Excited to launch our new civic data dashboard for Alabama! #CivicTech",
+      "created_at": "2024-12-01T15:30:00.000Z",
+      "author_id": "9876543210",
+      "conversation_id": "1234567890",
+      "public_metrics": {
+        "retweet_count": 12,
+        "reply_count": 5,
+        "like_count": 45,
+        "quote_count": 3,
+        "bookmark_count": 8,
+        "impression_count": 3200
+      },
+      "lang": "en",
+      "edit_history_tweet_ids": ["1234567890"]
+    },
+    {
+      "id": "1234567891",
+      "text": "Check out our latest data insights on education funding across Alabama counties.",
+      "created_at": "2024-12-02T10:00:00.000Z",
+      "author_id": "9876543210",
+      "conversation_id": "1234567891",
+      "public_metrics": {
+        "retweet_count": 8,
+        "reply_count": 3,
+        "like_count": 32,
+        "quote_count": 1,
+        "bookmark_count": 5,
+        "impression_count": 2100
+      },
+      "lang": "en",
+      "edit_history_tweet_ids": ["1234567891"]
+    }
+  ],
+  "meta": {
+    "result_count": 2,
+    "next_token": "next-page-token-abc",
+    "newest_id": "1234567891",
+    "oldest_id": "1234567890"
+  }
+}

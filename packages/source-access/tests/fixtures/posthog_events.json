@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "id": "evt-001",
+      "event": "$pageview",
+      "distinct_id": "user-abc",
+      "timestamp": "2024-12-01T12:00:00Z",
+      "properties": {
+        "$current_url": "https://unlockalabama.org/dashboard",
+        "$browser": "Chrome",
+        "$os": "macOS"
+      },
+      "elements": []
+    },
+    {
+      "id": "evt-002",
+      "event": "dashboard_filter_applied",
+      "distinct_id": "user-abc",
+      "timestamp": "2024-12-01T12:05:00Z",
+      "properties": {
+        "filter_type": "county",
+        "filter_value": "Jefferson"
+      },
+      "elements": []
+    }
+  ],
+  "next": "https://us.posthog.com/api/projects/12345/events/?limit=100&offset=2"
+}

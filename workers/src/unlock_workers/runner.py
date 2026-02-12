@@ -34,6 +34,17 @@ async def run_worker(component_name: str) -> None:
         sys.exit(1)
 
     config = COMPONENTS[component_name]
+
+    # Temporal's Worker requires at least one activity or workflow.
+    # Stub components (registered but not yet implemented) exit cleanly
+    # instead of crash-looping on Railway.
+    if not config.workflows and not config.activities:
+        logger.info(
+            f"Component '{component_name}' has no workflows or activities yet — "
+            f"stub registered on queue '{config.task_queue}'. Exiting cleanly."
+        )
+        return
+
     client = await connect()
 
     logger.info(
