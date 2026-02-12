@@ -64,3 +64,59 @@ The alias must NOT start with `test_` or pytest will still collect it.
 
 **Rule:** When importing production functions named `test_*` into test files, always alias them
 with a non-`test_` prefix to prevent pytest collection.
+
+## 2026-02-12: Railway GitHub integration is per-service, not per-project
+
+**Problem:** Created 9 Railway services via `railway up` (CLI push) but assumed GitHub auto-deploy
+would "just work." PR environments never triggered because Railway had no connection to GitHub.
+
+**Root cause:** Railway connects to GitHub repos at the **service** level, not the project level.
+Each service must be individually connected via `serviceConnect` GraphQL mutation or the dashboard.
+The `railway up` command uploads code directly — it bypasses GitHub entirely.
+
+**Fix:** Used Railway's GraphQL API to connect all 9 services to the GitHub repo:
+```graphql
+mutation { serviceConnect(id: $serviceId, input: { repo: "owner/repo", branch: "main" }) { id } }
+```
+
+**Rule:** After creating Railway services, always connect them to GitHub via `serviceConnect`. The
+CLI's `railway up` is for bootstrapping/testing — production should deploy from GitHub pushes.
+
+## 2026-02-12: Railway PR environments require PRs targeting the connected branch
+
+**Problem:** PR #1 targeted `staging`, but services were connected to `main`. Railway only creates
+PR environments for PRs against the branch a service is connected to.
+
+**Fix:** Set up two Railway environments:
+- **production** → services connected to `main` branch
+- **staging** → services connected to `staging` branch (via separate deployment triggers)
+
+PR environments are ephemeral copies created when PRs target either branch.
+
+**Rule:** Railway's branch model maps 1:1 with environments. If you have a `feat → staging → main`
+workflow, you need separate Railway environments for staging and production, each watching its branch.
+
+## 2026-02-12: Railway deployment triggers control branch, checkSuites, and repo per environment
+
+**Problem:** After creating a staging environment by duplicating production, all triggers pointed to
+`main`. Staging services deployed from the wrong branch.
+
+**Fix:** Use `deploymentTriggerUpdate` mutation to update each trigger's branch and enable checkSuites:
+```graphql
+mutation { deploymentTriggerUpdate(id: $triggerId, input: { branch: "staging", checkSuites: true }) { id } }
+```
+
+**Rule:** When duplicating a Railway environment, always update the deployment triggers on the new
+environment — they inherit the source environment's branch, not the new environment's intended branch.
+
+## 2026-02-12: Temporal Worker requires at least one activity or workflow
+
+**Problem:** Registered a scheduler stub in the component registry with zero workflows and zero
+activities. Temporal's `Worker.__init__` raises `ValueError: At least one activity, Nexus service,
+or workflow must be specified`, causing the Railway service to crash-loop.
+
+**Fix:** Added an early exit in the runner: if a component has no workflows and no activities, log
+a clean message and return instead of constructing a Worker.
+
+**Rule:** Stub components in the registry should be handled gracefully at runtime. Never pass empty
+workflow/activity lists to `Worker()` — guard against it in the runner.
