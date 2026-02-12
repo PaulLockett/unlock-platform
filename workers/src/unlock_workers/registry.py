@@ -31,6 +31,7 @@ from unlock_shared.task_queues import (
     DATA_ACCESS_QUEUE,
     DATA_MANAGER_QUEUE,
     LLM_GATEWAY_QUEUE,
+    SCHEDULER_QUEUE,
     SCHEMA_ENGINE_QUEUE,
     SOURCE_ACCESS_QUEUE,
     TRANSFORM_ENGINE_QUEUE,
@@ -85,5 +86,8 @@ COMPONENTS: dict[str, ComponentConfig] = {
     "llm-gateway": ComponentConfig(
         task_queue=LLM_GATEWAY_QUEUE,
         activities=[hello_llm_assess],
+    ),
+    "scheduler": ComponentConfig(
+        task_queue=SCHEDULER_QUEUE,
     ),
 }
