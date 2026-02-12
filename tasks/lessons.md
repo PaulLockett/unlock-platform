@@ -40,3 +40,27 @@ ensures reproducible builds across environments.
 
 **Rule:** Always commit `uv.lock`. Use explicit `COPY pyproject.toml uv.lock ./` (no glob) in
 Dockerfiles so a missing lockfile fails loudly at build time.
+
+## 2026-02-11: Temporal activity.heartbeat() fails outside activity context
+
+**Problem:** Connector tests called `fetch_data()` which invokes `activity.heartbeat()` inside the
+pagination loop. Outside a Temporal worker, this raises "Not in activity context" and the catch-all
+`except Exception` in `fetch_data` returns `success=False` even though records were fetched.
+
+**Fix:** Wrap heartbeat in `contextlib.suppress(Exception)` — heartbeat is best-effort progress
+reporting, not a correctness requirement. The pagination loop works identically with or without it.
+
+**Rule:** Always use `contextlib.suppress` for Temporal activity context methods (heartbeat, info)
+when the code may run outside a worker context (tests, scripts). Never let infrastructure-level
+calls break business logic.
+
+## 2026-02-11: pytest collects imported functions named test_*
+
+**Problem:** `from activities import test_connection` in a test file causes pytest to collect
+`test_connection` as a module-level test function and fail because it expects fixture parameters.
+
+**Fix:** Alias the import: `from activities import test_connection as activity_test_connection`.
+The alias must NOT start with `test_` or pytest will still collect it.
+
+**Rule:** When importing production functions named `test_*` into test files, always alias them
+with a non-`test_` prefix to prevent pytest collection.

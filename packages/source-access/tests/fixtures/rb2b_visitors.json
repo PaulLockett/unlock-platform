@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "id": "visitor-001",
+      "email": "jsmith@techcorp.com",
+      "first_name": "John",
+      "last_name": "Smith",
+      "title": "Director of Civic Innovation",
+      "linkedin_url": "https://linkedin.com/in/jsmith",
+      "company": {
+        "name": "TechCorp Alabama",
+        "domain": "techcorp.com",
+        "industry": "Technology",
+        "employee_count": 250,
+        "revenue_range": "$10M-$50M",
+        "linkedin_url": "https://linkedin.com/company/techcorp",
+        "location": "Birmingham, AL"
+      },
+      "page_views": [
+        {"url": "/dashboard", "timestamp": "2024-12-01T10:00:00Z"},
+        {"url": "/data/education", "timestamp": "2024-12-01T10:05:00Z"}
+      ],
+      "first_seen": "2024-12-01T10:00:00Z",
+      "last_seen": "2024-12-01T10:05:00Z",
+      "visit_count": 3
+    }
+  ],
+  "total": 1,
+  "credits_used": 1
+}

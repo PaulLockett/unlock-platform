@@ -34,6 +34,19 @@ def test_activity_components_have_no_workflows() -> None:
         assert len(config.activities) >= 1, f"{name} should have at least one activity"
 
 
+def test_source_access_has_four_activities() -> None:
+    """Source Access should register all four real activities."""
+    sa = COMPONENTS["source-access"]
+    assert len(sa.activities) == 4
+    activity_names = {a.__name__ for a in sa.activities}
+    assert activity_names == {
+        "connect_source",
+        "fetch_source_data",
+        "test_connection",
+        "get_source_schema",
+    }
+
+
 def test_each_component_has_unique_queue() -> None:
     """No two components should share a task queue."""
     queues = [config.task_queue for config in COMPONENTS.values()]

@@ -35,7 +35,12 @@ from unlock_shared.task_queues import (
     SOURCE_ACCESS_QUEUE,
     TRANSFORM_ENGINE_QUEUE,
 )
-from unlock_source_access.activities import hello_source_access
+from unlock_source_access.activities import (
+    connect_source,
+    fetch_source_data,
+    get_source_schema,
+    test_connection,
+)
 from unlock_transform_engine.activities import hello_transform
 
 
@@ -55,7 +60,7 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "source-access": ComponentConfig(
         task_queue=SOURCE_ACCESS_QUEUE,
-        activities=[hello_source_access],
+        activities=[connect_source, fetch_source_data, test_connection, get_source_schema],
     ),
     "transform-engine": ComponentConfig(
         task_queue=TRANSFORM_ENGINE_QUEUE,

@@ -64,6 +64,59 @@
 - [x] 6 unit tests pass, ruff clean
 - [ ] Monitoring dashboards: Railway (https://railway.com), Temporal Cloud (cloud.temporal.io), Supabase (supabase.com), Vercel — all accessible via web
 
+---
+
+# SRC_ACC: Source Access — Progress
+
+## Step 1: Versioning Setup
+- [x] Tag v0.1.0 on current main HEAD (INFRA milestone)
+- [x] Create .github/workflows/release.yml (triggered on version tags)
+- [x] Create staging branch from main
+- [x] Update ci.yml to trigger on staging branch
+- [x] Create feat/src-acc feature branch
+
+## Step 2: Shared Models + Rate Limiter + Base Connector
+- [x] source_models.py: SourceConfig, FetchRequest, ConnectionResult, FetchResult, SourceSchema
+- [x] rate_limit.py: TokenBucket async rate limiter
+- [x] connectors/base.py: BaseConnector ABC with retry, rate limiting, pagination
+- [x] connectors/__init__.py: get_connector() factory
+- [x] Add httpx + tenacity dependencies
+
+## Step 3: Typed Models (per connector)
+- [x] models/unipile.py: UnipilePost, UnipileEmail, UnipileAttachment
+- [x] models/x.py: XTweet, XUser, XTweetMetrics, XPaginationMeta
+- [x] models/posthog.py: PostHogEvent, PostHogPerson, PostHogQueryResult
+- [x] models/rb2b.py: RB2BPerson, RB2BCompany, RB2BWebhookPayload
+
+## Step 4-7: Connectors
+- [x] UnipileConnector (LinkedIn posts, Instagram posts, Gmail emails)
+- [x] XConnector (Twitter API v2, pay-per-use cost logging)
+- [x] PostHogConnector (events, persons)
+- [x] RB2BConnector (API enrichment + CSV/JSON file dump)
+
+## Step 8: Activity Functions + Registry + Workflow Updates
+- [x] Replace hello_source_access with 4 real activities
+- [x] Update registry.py — source-access now registers 4 activities
+- [x] Update IngestWorkflow to use FetchRequest/FetchResult
+- [x] Update verify_infra.py for new activity signatures
+- [x] Add source access env vars to .env.example
+
+## Step 9: Tests
+- [x] test_rate_limit.py — 8 tests (parametric)
+- [x] test_models.py — 19 tests (all model types + boundary models)
+- [x] test_connectors.py — 33 tests (factory, connect, fetch, pagination, schema, credentials)
+- [x] test_activities.py — 7 tests (mocked connectors, lifecycle, error handling)
+- [x] test_integration.py — 4 tests (skipped without API keys)
+- [x] test_registry.py — 5 tests (including new source-access-specific test)
+- [x] Total: 79 passed, 4 skipped, 0 failures
+
+## Step 10: Verification
+- [x] `ruff check packages/ workers/` — all clean
+- [x] `pytest packages/ workers/ -v` — 79 passed, 4 skipped
+- [ ] PR to staging — CI green
+- [ ] Paul adds API keys to staging — integration tests
+- [ ] Merge to main — production deploy, v0.2.0 release
+
 ## Acceptance Criteria (from Monday.com)
 - [x] All environments accessible (local dev + cloud services)
 - [x] CI/CD pipeline successfully deploys a hello-world service
