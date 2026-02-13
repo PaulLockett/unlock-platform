@@ -46,26 +46,23 @@ class RB2BConnector(BaseConnector):
         return {}
 
     async def _check_connection(self, client: httpx.AsyncClient) -> ConnectionResult:
-        """Verify API credentials by calling the account/status endpoint."""
-        try:
-            response = await self._request_with_retry(client, "GET", "account/status")
-            data = response.json()
-            credits_remaining = data.get("credits_remaining", "unknown")
-            return ConnectionResult(
-                success=True,
-                message=f"Connected to RB2B — {credits_remaining} credits remaining",
-                source_id=self.config.source_id,
-                source_type=self.config.source_type,
-                data={"credits_remaining": credits_remaining},
-            )
-        except httpx.HTTPStatusError:
-            # Some RB2B plans may not have a status endpoint — treat as OK if auth works
-            return ConnectionResult(
-                success=True,
-                message="RB2B API key accepted (status endpoint unavailable)",
-                source_id=self.config.source_id,
-                source_type=self.config.source_type,
-            )
+        """Verify API credentials by calling the account/status endpoint.
+
+        Unlike other connectors, RB2B returns HTTP errors when the API key
+        has no activated endpoints. We must NOT swallow these — a 401/403
+        means auth failed, and a 404 means the endpoint isn't enabled for
+        this key. Both are real failures that tests should surface.
+        """
+        response = await self._request_with_retry(client, "GET", "account/status")
+        data = response.json()
+        credits_remaining = data.get("credits_remaining", "unknown")
+        return ConnectionResult(
+            success=True,
+            message=f"Connected to RB2B — {credits_remaining} credits remaining",
+            source_id=self.config.source_id,
+            source_type=self.config.source_type,
+            data={"credits_remaining": credits_remaining},
+        )
 
     async def _fetch_page(
         self,

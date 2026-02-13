@@ -319,8 +319,13 @@ class TestRB2BConnector:
         assert "500 credits" in result.message
         await connector.close()
 
-    async def test_connect_fallback_on_status_error(self, mock_env, rb2b_config):
-        """If the status endpoint returns 404, treat as OK (some plans lack it)."""
+    async def test_connect_http_error_propagates(self, mock_env, rb2b_config):
+        """HTTP errors from account/status must propagate as connection failures.
+
+        RB2B returns 404 when the API key has no activated endpoints, and
+        401/403 when auth fails. All of these are real failures — the connector
+        must NOT swallow them, otherwise tests falsely pass.
+        """
         transport = MockTransport(
             responses=[httpx.Response(404, json={"error": "not found"})]
         )
@@ -328,8 +333,21 @@ class TestRB2BConnector:
         _inject_transport(connector, transport)
 
         result = await connector.connect()
-        assert result.success
-        assert "status endpoint unavailable" in result.message
+        assert not result.success
+        assert "Connection failed" in result.message
+        await connector.close()
+
+    async def test_connect_401_unauthorized(self, mock_env, rb2b_config):
+        """401 Unauthorized must surface as connection failure."""
+        transport = MockTransport(
+            responses=[httpx.Response(401, json={"error": "unauthorized"})]
+        )
+        connector = RB2BConnector(rb2b_config)
+        _inject_transport(connector, transport)
+
+        result = await connector.connect()
+        assert not result.success
+        assert "Connection failed" in result.message
         await connector.close()
 
     async def test_fetch_visitors_api(self, mock_env, rb2b_config, rb2b_fetch_request):
