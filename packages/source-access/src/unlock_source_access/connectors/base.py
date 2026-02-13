@@ -50,6 +50,7 @@ class BaseConnector(ABC):
         self.config = config
         self.rate_limiter = TokenBucket(rate=config.rate_limit_per_second)
         self._client: httpx.AsyncClient | None = None
+        self.request_count: int = 0
 
     @property
     def source_type(self) -> str:
@@ -133,6 +134,7 @@ class BaseConnector(ABC):
     ) -> httpx.Response:
         """Make an HTTP request with rate limiting and retry on transient errors."""
         await self.rate_limiter.acquire()
+        self.request_count += 1
         response = await client.request(method, url, **kwargs)
         response.raise_for_status()
         return response

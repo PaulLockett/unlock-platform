@@ -109,6 +109,51 @@ mutation { deploymentTriggerUpdate(id: $triggerId, input: { branch: "staging", c
 **Rule:** When duplicating a Railway environment, always update the deployment triggers on the new
 environment — they inherit the source environment's branch, not the new environment's intended branch.
 
+## 2026-02-13: Never swallow HTTP errors to fake a successful connection
+
+**Problem:** RB2B connector's `_check_connection` caught `httpx.HTTPStatusError` and returned
+`ConnectionResult(success=True, message="...status endpoint unavailable")`. This caused live API
+tests to falsely pass even when the API key had no activated endpoints — the dashboard showed zero
+requests with data, confirming no real work was done.
+
+**Root cause:** A well-intentioned "fallback" for accounts without the status endpoint. But this
+silently hid real failures (404 = no endpoints activated, 401 = bad auth). The base class `connect()`
+already catches all exceptions and returns `success=False` — the subclass exception handler was
+redundant and harmful.
+
+**Fix:** Removed the `except httpx.HTTPStatusError` block from `_check_connection`. HTTP errors now
+propagate to the base class, which properly returns `success=False` with the actual error message.
+
+**Rule:** Connector `_check_connection` implementations must NEVER catch HTTP errors. The base class
+`connect()` handles all exception-to-result conversion. If a subclass catches exceptions, it creates
+a false positive that defeats the entire purpose of connection verification.
+
+## 2026-02-13: Cost estimates for live API tests must be based on measured data
+
+**Problem:** Initial ESVT cost estimate was "~$0.02 per full run" based on theoretical API pricing.
+Actual X.com spend was $0.51 for 8 requests across development iterations — 25x higher than quoted.
+
+**Fix:** Added `request_count` to `BaseConnector`, incremented in `_request_with_retry`. Every live
+test now reports its actual request count via `_report_requests()`. Run with `pytest -s` to see.
+
+**Rule:** Never quote cost estimates without measurement. Always track and surface actual request
+counts. Cost-per-request varies by API tier, endpoint, and account plan — the only reliable number
+is the one you measure.
+
+## 2026-02-13: Distinguish external failures from code bugs in live tests
+
+**Problem:** Paul identified that disconnected accounts (Instagram on Unipile), lack of API credits,
+and non-activated endpoints should not cause test failures. But they also shouldn't be silently
+ignored — tests must verify the failure is external before passing.
+
+**Fix:** Added `EXTERNAL_FAILURE_PATTERNS` dict that maps known external failure signals (disconnected,
+rate limited, 404 not found, insufficient credits) to categories. `_assert_success_or_external_failure`
+either passes, skips with reason (external), or fails (internal bug).
+
+**Rule:** Live API tests must handle three outcomes: (1) success → pass, (2) external failure →
+skip with reason, (3) internal failure → fail. Never let external issues mask code bugs, and never
+let code bugs be excused as external issues.
+
 ## 2026-02-12: Temporal Worker requires at least one activity or workflow
 
 **Problem:** Registered a scheduler stub in the component registry with zero workflows and zero

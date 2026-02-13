@@ -1,0 +1,165 @@
+name: "Live API Verification"
+
+# External Service Verification Tests (ESVTs)
+#
+# These tests hit REAL external APIs to verify our integration code works
+# against actual API responses. They exist at the top of the test pyramid
+# as deployment verification — catching contract drift, credential expiration,
+# and parsing bugs that mocked tests cannot.
+#
+# Runs on: PRs targeting main (i.e., staging → main promotion)
+# Cost: ~$0.02 per full run, safe at x100 = ~$2.00
+#
+# Terminology (for searchability):
+#   - Broad integration tests (Martin Fowler)
+#   - Deployment Verification Tests (Jez Humble, Continuous Delivery)
+#   - External Service Verification Tests (ESVTs)
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Detect which connectors have changed files — gates the per-connector
+  # contract tests so we only spend API credits on connectors that changed.
+  # -----------------------------------------------------------------------
+  detect-changes:
+    name: Detect changed connectors
+    runs-on: ubuntu-latest
+    outputs:
+      unipile: ${{ steps.filter.outputs.unipile }}
+      x: ${{ steps.filter.outputs.x }}
+      posthog: ${{ steps.filter.outputs.posthog }}
+      rb2b: ${{ steps.filter.outputs.rb2b }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            unipile:
+              - 'packages/source-access/src/unlock_source_access/connectors/unipile.py'
+              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
+              - 'packages/shared/src/unlock_shared/source_models.py'
+            x:
+              - 'packages/source-access/src/unlock_source_access/connectors/x.py'
+              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
+              - 'packages/shared/src/unlock_shared/source_models.py'
+            posthog:
+              - 'packages/source-access/src/unlock_source_access/connectors/posthog.py'
+              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
+              - 'packages/shared/src/unlock_shared/source_models.py'
+            rb2b:
+              - 'packages/source-access/src/unlock_source_access/connectors/rb2b.py'
+              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
+              - 'packages/shared/src/unlock_shared/source_models.py'
+            shared:
+              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
+              - 'packages/source-access/src/unlock_source_access/activities.py'
+              - 'packages/shared/src/unlock_shared/source_models.py'
+
+  # -----------------------------------------------------------------------
+  # System-wide acceptance test — runs on EVERY staging→main PR regardless
+  # of file changes. This is the cheapest possible "are all services alive?"
+  # gate (~$0.00, auth checks only). Catches credential expiration and
+  # API outages that happen independently of code changes.
+  # -----------------------------------------------------------------------
+  acceptance:
+    name: "Acceptance: all connectors healthy"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync
+
+      - name: Run acceptance test (auth smoke across all connectors)
+        env:
+          UNIPILE_API_KEY: ${{ secrets.UNIPILE_API_KEY }}
+          UNIPILE_DSN: ${{ secrets.UNIPILE_DSN }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
+          RB2B_API_KEY: ${{ secrets.RB2B_API_KEY }}
+        run: |
+          uv run pytest packages/source-access/tests/test_live_api.py \
+            -v -m "acceptance" --tb=short
+
+  # -----------------------------------------------------------------------
+  # Per-connector contract tests — only run when that connector's code
+  # changed. These are tier 2 (minimal data fetch + shape validation),
+  # slightly more expensive than smoke but still very cheap.
+  # -----------------------------------------------------------------------
+  contract-unipile:
+    name: "Contract: Unipile"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.unipile == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync
+      - name: Run Unipile contract tests
+        env:
+          UNIPILE_API_KEY: ${{ secrets.UNIPILE_API_KEY }}
+          UNIPILE_DSN: ${{ secrets.UNIPILE_DSN }}
+        run: |
+          uv run pytest packages/source-access/tests/test_live_api.py \
+            -v -m "contract" -k "Unipile" --tb=short
+
+  contract-x:
+    name: "Contract: X.com"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.x == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync
+      - name: Run X.com contract tests
+        env:
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+        run: |
+          uv run pytest packages/source-access/tests/test_live_api.py \
+            -v -m "contract" -k "XContract" --tb=short
+
+  contract-posthog:
+    name: "Contract: PostHog"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.posthog == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync
+      - name: Run PostHog contract tests
+        env:
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
+        run: |
+          uv run pytest packages/source-access/tests/test_live_api.py \
+            -v -m "contract" -k "PostHog" --tb=short
+
+  contract-rb2b:
+    name: "Contract: RB2B"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rb2b == 'true' || needs.detect-changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync
+      - name: Run RB2B contract tests
+        env:
+          RB2B_API_KEY: ${{ secrets.RB2B_API_KEY }}
+        run: |
+          uv run pytest packages/source-access/tests/test_live_api.py \
+            -v -m "contract" -k "RB2B" --tb=short

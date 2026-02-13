@@ -1,4 +1,5 @@
 {
+  "object": "PostList",
   "items": [
     {
       "id": "post-001",
@@ -37,8 +38,5 @@
       ]
     }
   ],
-  "pagination": {
-    "cursor": "cursor-page2",
-    "has_more": true
-  }
+  "cursor": "cursor-page2"
 }
