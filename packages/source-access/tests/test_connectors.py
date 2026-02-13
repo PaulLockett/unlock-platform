@@ -95,10 +95,10 @@ class TestUnipileConnector:
 
     async def test_fetch_posts_single_page(self, mock_env, unipile_config, unipile_fetch_request):
         fixture = load_fixture("unipile_posts.json")
-        # Return page 1 with has_more=true, then page 2 with has_more=false
+        # Return page 1 with cursor, then page 2 with no cursor (end of data)
         page2 = {
             "items": [{"id": "post-003", "provider": "LINKEDIN", "text": "Page 2"}],
-            "pagination": {"cursor": None, "has_more": False},
+            "cursor": None,
         }
         transport = MockTransport(
             responses=[
@@ -140,6 +140,10 @@ class TestUnipileConnector:
         assert result.record_count == 1
         assert result.records[0]["subject"] == "Partnership opportunity for Unlock Alabama"
         assert result.records[0]["from_address"] == "partner@example.com"
+        assert result.records[0]["body_html"] == "<p>Hi, we'd love to discuss...</p>"
+        assert result.records[0]["body_plain"] == "Hi, we'd love to discuss..."
+        assert result.records[0]["is_read"] is True
+        assert result.records[0]["folder"] == "inbox"
         await connector.close()
 
     async def test_connect_failure(self, mock_env, unipile_config):

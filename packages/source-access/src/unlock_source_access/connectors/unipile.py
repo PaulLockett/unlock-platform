@@ -6,8 +6,8 @@ We use it for:
   - Instagram posts + engagement analytics (likes, comments, reach)
   - Gmail emails for tracking outreach and responses
 
-Auth: Bearer token via Authorization header.
-Pagination: Cursor-based (response.pagination.cursor + pagination.hasMore).
+Auth: X-API-Key header (NOT Bearer — Unipile uses a custom header).
+Pagination: Cursor-based (response.cursor field at top level).
 Base URL: https://{subdomain}.unipile.com:{port}/api/v1/
 """
 
@@ -32,7 +32,7 @@ class UnipileConnector(BaseConnector):
         return "https://api1.unipile.com:13337/api/v1/"
 
     def _auth_headers(self, credential: str) -> dict[str, str]:
-        return {"Authorization": f"Bearer {credential}"}
+        return {"X-API-Key": credential}
 
     def _parse_config(self) -> dict[str, Any]:
         """Parse connector-specific config (account_id, provider, etc.)."""
@@ -74,23 +74,28 @@ class UnipileConnector(BaseConnector):
         cursor: str | None,
         account_id: str,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """Fetch one page of LinkedIn or Instagram posts."""
+        """Fetch one page of LinkedIn or Instagram posts.
+
+        Unipile requires account_id as a query parameter (not in the URL path)
+        to scope which connected account to read posts from.
+        """
         params: dict[str, Any] = {"limit": 100}
+        if account_id:
+            params["account_id"] = account_id
         if cursor:
             params["cursor"] = cursor
         if request.since:
             params["after"] = request.since.isoformat()
 
-        url = f"users/{account_id}/posts" if account_id else "posts"
-        response = await self._request_with_retry(client, "GET", url, params=params)
+        response = await self._request_with_retry(
+            client, "GET", "users/me/posts", params=params
+        )
         data = response.json()
 
         items = data.get("items", [])
         records = [self._normalize_post(item) for item in items]
 
-        pagination = data.get("pagination", {})
-        next_cursor = pagination.get("cursor") if pagination.get("has_more") else None
-
+        next_cursor = data.get("cursor")
         return records, next_cursor
 
     async def _fetch_emails_page(
@@ -115,9 +120,7 @@ class UnipileConnector(BaseConnector):
         items = data.get("items", [])
         records = [self._normalize_email(item) for item in items]
 
-        pagination = data.get("pagination", {})
-        next_cursor = pagination.get("cursor") if pagination.get("has_more") else None
-
+        next_cursor = data.get("cursor")
         return records, next_cursor
 
     async def _discover_schema(
@@ -160,30 +163,40 @@ class UnipileConnector(BaseConnector):
 
     @staticmethod
     def _normalize_email(item: dict[str, Any]) -> dict[str, Any]:
-        """Normalize a Unipile email response to our model shape."""
+        """Normalize a Unipile email response to our model shape.
+
+        Real API field names (discovered via live contract tests):
+          from_attendee (dict)  — not "from"
+          to_attendees (list)   — not "to"
+          cc_attendees (list)   — not "cc"
+          body_plain (str)      — flat field, not nested under "body"
+          body (str)            — HTML body as flat field
+          read_date (str|None)  — not "is_read" bool
+          role (str)            — e.g. "inbox", not "folder"
+        """
+        # from_attendee is a dict with attendee_provider, display_name, etc.
+        from_att = item.get("from_attendee", {})
+        from_address = (
+            from_att.get("display_name", "") if isinstance(from_att, dict) else str(from_att)
+        )
+
+        def _extract_attendees(attendees: list[Any]) -> list[str]:
+            return [
+                a.get("display_name", "") if isinstance(a, dict) else str(a)
+                for a in attendees
+            ]
+
         return {
             "id": item.get("id", ""),
             "account_id": item.get("account_id", ""),
             "subject": item.get("subject", ""),
-            "from_address": item.get("from", {}).get("address", "")
-            if isinstance(item.get("from"), dict)
-            else item.get("from", ""),
-            "to_addresses": [
-                r.get("address", "") if isinstance(r, dict) else r
-                for r in item.get("to", [])
-            ],
-            "cc_addresses": [
-                r.get("address", "") if isinstance(r, dict) else r
-                for r in item.get("cc", [])
-            ],
+            "from_address": from_address,
+            "to_addresses": _extract_attendees(item.get("to_attendees", [])),
+            "cc_addresses": _extract_attendees(item.get("cc_attendees", [])),
             "date": item.get("date"),
-            "body_plain": item.get("body", {}).get("plain", "")
-            if isinstance(item.get("body"), dict)
-            else "",
-            "body_html": item.get("body", {}).get("html", "")
-            if isinstance(item.get("body"), dict)
-            else "",
-            "is_read": item.get("is_read", False),
-            "folder": item.get("folder", ""),
+            "body_plain": item.get("body_plain", ""),
+            "body_html": item.get("body", "") if isinstance(item.get("body"), str) else "",
+            "is_read": item.get("read_date") is not None,
+            "folder": item.get("role", ""),
             "attachments": item.get("attachments", []),
         }

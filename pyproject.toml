@@ -10,6 +10,7 @@ dev = [
     "pytest-asyncio>=0.25.0",
     "ruff>=0.9.0",
     "mypy>=1.14.0",
+    "python-dotenv>=1.2.1",
 ]
 
 [tool.uv.workspace]
@@ -32,3 +33,9 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["packages", "workers"]
 asyncio_mode = "auto"
+markers = [
+    "live: tests that hit real external APIs (cost money, require credentials)",
+    "smoke: tier-1 auth-only verification (cheapest possible)",
+    "contract: tier-2 minimal data fetch + response shape validation",
+    "acceptance: system-wide health check across all connectors",
+]
