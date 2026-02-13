@@ -165,3 +165,40 @@ a clean message and return instead of constructing a Worker.
 
 **Rule:** Stub components in the registry should be handled gracefully at runtime. Never pass empty
 workflow/activity lists to `Worker()` — guard against it in the runner.
+
+## 2026-02-13: RB2B API Partner Program is a separate product from RB2B pixel
+
+**Problem:** Built the RB2B connector against invented endpoints (`/v1/account/status`, `/v1/visitors`)
+that don't exist. Every URL at `api.rb2b.com/v1/` returns a 404 HTML page. Live tests "passed" only
+because the external failure detector treated 404 as "endpoint not activated."
+
+**Root cause:** The standard RB2B product is a website pixel (JavaScript snippet) that tracks visitors.
+The RB2B **API Partner Program** is a completely separate enrichment/identity resolution API. It has:
+  - Different base URL: `https://api.rb2b.com/api/v1/` (note the `/api/` prefix)
+  - Different auth header: `Api-Key` (not `X-API-Key`)
+  - No `/visitors` or `/account/status` endpoints
+  - `GET /credits` for credit balance
+  - 13 enrichment endpoints: `ip_to_hem`, `ip_to_maid`, `ip_to_company`, `hem_to_best_linkedin`,
+    `hem_to_business_profile`, `hem_to_linkedin`, `hem_to_maid`, `linkedin_to_best_personal_email`,
+    `linkedin_to_hashed_emails`, `linkedin_to_mobile_phone`, `linkedin_to_personal_email`,
+    `linkedin_to_business_profile`, `linkedin_slug_search`
+  - All enrichment endpoints are POST with specific input (IP, email/MD5, LinkedIn slug)
+
+**Fix:** Rewrote connector with correct base URL, auth header, `/credits` connection check, and
+enrichment dispatch via `resource_type` matching endpoint name. Kept file dump mode for CSV/JSON
+exports from the RB2B dashboard (pixel data).
+
+**Rule:** Never build a connector against assumed API endpoints. Always verify endpoint paths against
+actual API documentation (Postman collection, OpenAPI spec, or manual probing). When an API returns
+HTML on 404 instead of JSON error responses, that's a signal the endpoint doesn't exist.
+
+## 2026-02-13: RB2B API returns score as string, not float
+
+**Problem:** Postman docs show `"score": 0.95` (number), but the real `ip_to_hem` response returns
+`"score": "0.844"` (string). Contract test caught this immediately.
+
+**Fix:** Changed assertion from `isinstance(record["score"], (int, float))` to `float(record["score"])`
+to handle both string and numeric representations.
+
+**Rule:** Never trust example responses in API documentation for type assertions. Contract tests should
+be resilient to string↔number coercion since many APIs are inconsistent about JSON types.

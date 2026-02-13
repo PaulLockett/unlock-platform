@@ -149,7 +149,8 @@ def rb2b_fetch_request() -> FetchRequest:
     return FetchRequest(
         source_id="test-rb2b",
         source_type="rb2b",
-        resource_type="visitors",
+        resource_type="ip_to_hem",
         auth_env_var="RB2B_API_KEY",
+        config_json='{"ip_address": "203.0.113.42"}',
         max_pages=2,
     )

@@ -306,6 +306,7 @@ class TestPostHogConnector:
 
 class TestRB2BConnector:
     async def test_connect_success(self, mock_env, rb2b_config):
+        """GET /credits validates auth and returns credit balance."""
         transport = MockTransport(
             responses=[
                 httpx.Response(200, json={"credits_remaining": 500}),
@@ -320,12 +321,7 @@ class TestRB2BConnector:
         await connector.close()
 
     async def test_connect_http_error_propagates(self, mock_env, rb2b_config):
-        """HTTP errors from account/status must propagate as connection failures.
-
-        RB2B returns 404 when the API key has no activated endpoints, and
-        401/403 when auth fails. All of these are real failures — the connector
-        must NOT swallow them, otherwise tests falsely pass.
-        """
+        """HTTP errors from /credits must propagate as connection failures."""
         transport = MockTransport(
             responses=[httpx.Response(404, json={"error": "not found"})]
         )
@@ -350,19 +346,51 @@ class TestRB2BConnector:
         assert "Connection failed" in result.message
         await connector.close()
 
-    async def test_fetch_visitors_api(self, mock_env, rb2b_config, rb2b_fetch_request):
-        fixture = load_fixture("rb2b_visitors.json")
+    async def test_enrich_ip_to_hem(self, mock_env):
+        """POST /ip_to_hem returns hashed email matches with scores."""
+        fixture = load_fixture("rb2b_ip_to_hem.json")
         transport = MockTransport(
             responses=[httpx.Response(200, json=fixture)]
         )
-        connector = RB2BConnector(rb2b_config)
+        config = SourceConfig(
+            source_id="test-rb2b-enrich",
+            source_type="rb2b",
+            auth_env_var="RB2B_API_KEY",
+            config_json=json.dumps({"ip_address": "203.0.113.42"}),
+        )
+        connector = RB2BConnector(config)
         _inject_transport(connector, transport)
 
-        result = await connector.fetch_data(rb2b_fetch_request)
+        request = FetchRequest(
+            source_id="test-rb2b-enrich",
+            source_type="rb2b",
+            resource_type="ip_to_hem",
+            auth_env_var="RB2B_API_KEY",
+            config_json=json.dumps({"ip_address": "203.0.113.42"}),
+            max_pages=1,
+        )
+        result = await connector.fetch_data(request)
         assert result.success
-        assert result.record_count == 1
-        assert result.records[0]["email"] == "jsmith@techcorp.com"
-        assert result.records[0]["company"]["name"] == "TechCorp Alabama"
+        assert result.record_count == 2
+        assert result.records[0]["md5"] == "5d41402abc4b2a76b9719d911017c592"
+        assert result.records[0]["score"] == 0.95
+        await connector.close()
+
+    async def test_enrich_unknown_resource_type_fails(self, mock_env, rb2b_config):
+        """Unknown resource_type raises ValueError, not a silent failure."""
+        connector = RB2BConnector(rb2b_config)
+        _inject_transport(connector, MockTransport())
+
+        request = FetchRequest(
+            source_id="test-rb2b",
+            source_type="rb2b",
+            resource_type="visitors",
+            auth_env_var="RB2B_API_KEY",
+            max_pages=1,
+        )
+        result = await connector.fetch_data(request)
+        assert not result.success
+        assert "Unknown RB2B resource_type" in result.message
         await connector.close()
 
     async def test_fetch_file_dump_csv(self, mock_env):

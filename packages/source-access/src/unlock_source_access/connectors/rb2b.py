@@ -1,13 +1,38 @@
-"""RB2B connector — B2B visitor identification via API and file dumps.
+"""RB2B connector — B2B identity resolution via API and file dumps.
 
-RB2B identifies companies and individuals visiting our web properties.
+RB2B's API Partner Program provides enrichment endpoints that resolve
+identity data across different namespaces:
+
+  Identification (IP → identity):
+    - ip_to_hem      — IP address → hashed email (MD5/SHA256) with confidence score
+    - ip_to_maid     — IP address → Mobile Advertising IDs (IDFA/AAID)
+    - ip_to_company  — IP address → company/business profile
+
+  Enrichment (HEM → profile):
+    - hem_to_best_linkedin     — hashed email → best LinkedIn URL
+    - hem_to_business_profile  — hashed email → company info
+    - hem_to_linkedin          — hashed email → LinkedIn slug
+    - hem_to_maid              — hashed email → Mobile Advertising IDs
+
+  Enrichment (LinkedIn → contact):
+    - linkedin_to_best_personal_email  — LinkedIn slug → best personal email
+    - linkedin_to_hashed_emails        — LinkedIn slug → hashed email variants
+    - linkedin_to_mobile_phone         — LinkedIn slug → mobile phone
+    - linkedin_to_personal_email       — LinkedIn slug → personal email variants
+    - linkedin_to_business_profile     — LinkedIn slug → company info
+
+  Search:
+    - linkedin_slug_search  — company domain → LinkedIn slug
+
+  Administrative:
+    - credits  — GET remaining credit balance
+
+Credit-based pricing — each enrichment call costs credits.
+Auth: API key via Api-Key header.
+
 Two modes:
-  1. API enrichment — IP→email, email→person, LinkedIn→profile
+  1. API enrichment — call enrichment endpoints with specific inputs
   2. File dump consumption — parse CSV/JSON exports from RB2B dashboard
-
-Credit-based pricing — the connector logs credit usage for cost awareness.
-
-Auth: API key via X-API-Key header.
 """
 
 from __future__ import annotations
@@ -29,15 +54,33 @@ from unlock_source_access.connectors.base import BaseConnector
 
 logger = logging.getLogger(__name__)
 
+# Enrichment endpoints and their required input fields.
+# Each endpoint is a POST that takes a JSON body with the specified input field.
+ENRICHMENT_ENDPOINTS: dict[str, str] = {
+    "ip_to_hem": "ip_address",
+    "ip_to_maid": "ip_address",
+    "ip_to_company": "ip_address",
+    "hem_to_best_linkedin": "email",
+    "hem_to_business_profile": "email",
+    "hem_to_linkedin": "md5",
+    "hem_to_maid": "md5",
+    "linkedin_to_best_personal_email": "linkedin_slug",
+    "linkedin_to_hashed_emails": "linkedin_slug",
+    "linkedin_to_mobile_phone": "linkedin_slug",
+    "linkedin_to_personal_email": "linkedin_slug",
+    "linkedin_to_business_profile": "linkedin_slug",
+    "linkedin_slug_search": "company_domain",
+}
+
 
 class RB2BConnector(BaseConnector):
-    """Connector for RB2B visitor identification (API + file dumps)."""
+    """Connector for RB2B identity resolution (API enrichment + file dumps)."""
 
     def _default_base_url(self) -> str:
-        return "https://api.rb2b.com/v1/"
+        return "https://api.rb2b.com/api/v1/"
 
     def _auth_headers(self, credential: str) -> dict[str, str]:
-        return {"X-API-Key": credential}
+        return {"Api-Key": credential}
 
     def _parse_config(self) -> dict[str, Any]:
         """Parse connector-specific config (file_path, enrichment_type, etc.)."""
@@ -46,14 +89,12 @@ class RB2BConnector(BaseConnector):
         return {}
 
     async def _check_connection(self, client: httpx.AsyncClient) -> ConnectionResult:
-        """Verify API credentials by calling the account/status endpoint.
+        """Verify API credentials by calling the credits endpoint.
 
-        Unlike other connectors, RB2B returns HTTP errors when the API key
-        has no activated endpoints. We must NOT swallow these — a 401/403
-        means auth failed, and a 404 means the endpoint isn't enabled for
-        this key. Both are real failures that tests should surface.
+        GET /credits returns the remaining credit balance. This validates
+        that the API key is active without consuming any credits.
         """
-        response = await self._request_with_retry(client, "GET", "account/status")
+        response = await self._request_with_retry(client, "GET", "credits")
         data = response.json()
         credits_remaining = data.get("credits_remaining", "unknown")
         return ConnectionResult(
@@ -70,47 +111,66 @@ class RB2BConnector(BaseConnector):
         request: FetchRequest,
         cursor: str | None,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """Fetch one page of visitor data via API or file dump."""
+        """Fetch data via enrichment API or file dump.
+
+        For API mode, resource_type must match an enrichment endpoint name
+        (e.g. "ip_to_hem"). The required input comes from config_json.
+        Enrichment calls are single-shot (no pagination).
+        """
         extra = self._parse_config()
         mode = extra.get("mode", "api")
 
         if mode == "file":
             return self._read_file_dump(extra), None
-        return await self._fetch_visitors_page(client, request, cursor)
+        return await self._enrich(client, request, extra)
 
-    async def _fetch_visitors_page(
+    async def _enrich(
         self,
         client: httpx.AsyncClient,
         request: FetchRequest,
-        cursor: str | None,
+        extra: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """Fetch one page of identified visitors from the API."""
-        params: dict[str, Any] = {"limit": 100}
-        if cursor:
-            params["offset"] = int(cursor)
-        if request.since:
-            params["since"] = request.since.isoformat()
+        """Call an enrichment endpoint and return the results.
+
+        The endpoint is determined by request.resource_type (must be a key
+        in ENRICHMENT_ENDPOINTS). The required input field's value comes
+        from config_json.
+        """
+        endpoint = request.resource_type
+        if endpoint not in ENRICHMENT_ENDPOINTS:
+            raise ValueError(
+                f"Unknown RB2B resource_type '{endpoint}'. "
+                f"Valid types: {', '.join(sorted(ENRICHMENT_ENDPOINTS))}"
+            )
+
+        input_field = ENRICHMENT_ENDPOINTS[endpoint]
+        input_value = extra.get(input_field)
+        if not input_value:
+            raise ValueError(
+                f"RB2B {endpoint} requires '{input_field}' in config_json"
+            )
+
+        body = {input_field: input_value}
 
         response = await self._request_with_retry(
-            client, "GET", "visitors", params=params
+            client, "POST", endpoint, json=body
         )
         data = response.json()
 
-        visitors = data.get("data", data.get("visitors", []))
-        records = [self._normalize_person(v) for v in visitors]
+        # Enrichment responses use "results" (plural) or "result" (singular)
+        results = data.get("results") or data.get("result")
+        if results is None:
+            return [], None
 
-        # Log credit usage for cost awareness
-        credits_used = data.get("credits_used", 0)
-        if credits_used:
-            logger.info(f"RB2B: {credits_used} credits used for {len(records)} visitors")
+        # Normalize to a list of records
+        if isinstance(results, list):
+            records = results
+        elif isinstance(results, dict):
+            records = [results]
+        else:
+            records = [{"value": results}]
 
-        # Offset-based pagination
-        total = data.get("total", 0)
-        current_offset = int(cursor) if cursor else 0
-        next_offset = current_offset + len(records)
-        next_cursor = str(next_offset) if next_offset < total else None
-
-        return records, next_cursor
+        return records, None
 
     def _read_file_dump(self, extra: dict[str, Any]) -> list[dict[str, Any]]:
         """Parse a CSV or JSON file dump from the RB2B dashboard.
@@ -141,7 +201,7 @@ class RB2BConnector(BaseConnector):
         client: httpx.AsyncClient,
         request: FetchRequest,
     ) -> dict[str, str]:
-        """Discover schema from a small sample of visitors."""
+        """Discover schema from a sample enrichment call or file dump."""
         extra = self._parse_config()
         mode = extra.get("mode", "api")
 
@@ -165,7 +225,7 @@ class RB2BConnector(BaseConnector):
 
     @staticmethod
     def _normalize_person(item: dict[str, Any]) -> dict[str, Any]:
-        """Normalize an RB2B visitor/person to our model shape."""
+        """Normalize an RB2B visitor/person record from file dumps."""
         company = item.get("company", {})
         return {
             "id": str(item.get("id", "")),
