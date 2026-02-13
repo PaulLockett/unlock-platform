@@ -1,0 +1,3 @@
+id,email,first_name,last_name,title,linkedin_url,company_name,company_domain,company_industry,company_employee_count,company_revenue_range,company_linkedin_url,company_location,first_seen,last_seen,visit_count
+visitor-csv-001,jane@civic.org,Jane,Doe,Policy Analyst,https://linkedin.com/in/janedoe,Civic Solutions,civic.org,Government,50,$1M-$5M,https://linkedin.com/company/civicsolutions,"Montgomery, AL",2024-12-01T08:00:00Z,2024-12-03T14:00:00Z,5
+visitor-csv-002,bob@research.edu,Bob,Johnson,Research Fellow,,State University,research.edu,Education,1000,$100M+,,"Tuscaloosa, AL",2024-12-02T09:00:00Z,2024-12-02T09:30:00Z,1

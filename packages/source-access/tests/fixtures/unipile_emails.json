@@ -1,0 +1,26 @@
+{
+  "object": "EmailList",
+  "items": [
+    {
+      "object": "Email",
+      "id": "email-001",
+      "account_id": "acc-789",
+      "subject": "Partnership opportunity for Unlock Alabama",
+      "from_attendee": {"display_name": "partner@example.com", "identifier": "partner@example.com"},
+      "to_attendees": [{"display_name": "team@unlockalabama.org", "identifier": "team@unlockalabama.org"}],
+      "cc_attendees": [],
+      "bcc_attendees": [],
+      "date": "2024-12-01T09:00:00Z",
+      "body": "<p>Hi, we'd love to discuss...</p>",
+      "body_plain": "Hi, we'd love to discuss...",
+      "read_date": "2024-12-01T10:00:00Z",
+      "role": "inbox",
+      "attachments": [],
+      "has_attachments": false,
+      "thread_id": "thread-001",
+      "message_id": "<msg-001@example.com>",
+      "provider_id": "provider-001"
+    }
+  ],
+  "cursor": null
+}
