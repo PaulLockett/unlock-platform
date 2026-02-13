@@ -618,6 +618,7 @@ class TestSystemWideAcceptance:
             pytest.skip("No connector API keys configured — cannot run acceptance test")
 
         results: dict[str, bool] = {}
+        connector_requests: dict[str, int] = {}
         errors: list[str] = []
         total_requests = 0
 
@@ -634,6 +635,7 @@ class TestSystemWideAcceptance:
                 result = await connector.connect()
                 requests_made = connector.request_count
                 total_requests += requests_made
+                connector_requests[source_type] = requests_made
 
                 if not result.success:
                     is_external, reason = _is_external_failure(result.message)
@@ -655,7 +657,9 @@ class TestSystemWideAcceptance:
             finally:
                 await connector.close()
 
-        # Report all results with request counts
+        # Report per-connector request counts (parseable by CI cost reporter)
+        for source_type, reqs in connector_requests.items():
+            print(f"\n  [{source_type} acceptance] API requests: {reqs}")
         print(f"\n  Acceptance test — total API requests: {total_requests}")
         for source_type, ok in results.items():
             status = "OK" if ok else "FAILED"
