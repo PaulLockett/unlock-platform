@@ -12,8 +12,9 @@ name: "Live API Verification"
 # RULE: staging→main PRs MUST have all green lights including zero skips.
 #       No test may be skipped — every connector must be fully operational.
 #
-# Cost tracking: Every test run posts/updates a PR comment with actual
-# API request counts and estimated costs per connector.
+# Cost tracking: A final job aggregates test results from ALL jobs and
+# posts/updates a PR comment with per-test request counts, status, and
+# estimated costs calculated from hardcoded per-API rates.
 #
 # Terminology (for searchability):
 #   - Broad integration tests (Martin Fowler)
@@ -57,97 +58,13 @@ jobs:
           uv run --package unlock-source-access pytest \
             packages/source-access/tests/test_live_api.py \
             -v -s -m "acceptance" --tb=short \
-            --junit-xml=acceptance-results.xml 2>&1 | tee acceptance-output.txt
+            2>&1 | tee acceptance-output.txt
 
-      - name: Parse and report costs
+      - uses: actions/upload-artifact@v4
         if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Extract request counts from pytest output
-          echo "## Live API Verification — Cost Report" > cost-report.md
-          echo "" >> cost-report.md
-          echo "**Run:** acceptance | **Trigger:** \`${{ github.event.pull_request.head.sha }}\`" >> cost-report.md
-          echo "" >> cost-report.md
-          echo "| Test | API Requests | Status |" >> cost-report.md
-          echo "|------|-------------|--------|" >> cost-report.md
-
-          total_requests=0
-          while IFS= read -r line; do
-            if echo "$line" | grep -q "API requests:"; then
-              label=$(echo "$line" | sed 's/.*\[\(.*\)\] API requests:.*/\1/')
-              count=$(echo "$line" | sed 's/.*API requests: \([0-9]*\).*/\1/')
-              total_requests=$((total_requests + count))
-              echo "| $label | $count | — |" >> cost-report.md
-            fi
-          done < acceptance-output.txt
-
-          # Extract pass/fail/skip from pytest output
-          while IFS= read -r line; do
-            if echo "$line" | grep -qE "PASSED|FAILED|SKIPPED"; then
-              test_name=$(echo "$line" | sed 's/.*::\(.*\) .*/\1/')
-              if echo "$line" | grep -q "PASSED"; then
-                status="PASSED"
-              elif echo "$line" | grep -q "FAILED"; then
-                status="FAILED"
-              elif echo "$line" | grep -q "SKIPPED"; then
-                status="SKIPPED"
-              fi
-            fi
-          done < acceptance-output.txt
-
-          echo "" >> cost-report.md
-          echo "**Total API requests this run:** $total_requests" >> cost-report.md
-          echo "" >> cost-report.md
-
-          # Estimated costs (conservative per-request estimates)
-          echo "<details><summary>Cost estimates (per-request basis)</summary>" >> cost-report.md
-          echo "" >> cost-report.md
-          echo "| API | Est. per request | Notes |" >> cost-report.md
-          echo "|-----|-----------------|-------|" >> cost-report.md
-          echo "| Unipile | \$0.00 | Subscription-based |" >> cost-report.md
-          echo "| X.com | ~\$0.005 | Basic tier pricing |" >> cost-report.md
-          echo "| PostHog | \$0.00 | Free API tier |" >> cost-report.md
-          echo "| RB2B | 1 credit | Credit-based |" >> cost-report.md
-          echo "" >> cost-report.md
-          echo "</details>" >> cost-report.md
-
-          cat cost-report.md
-
-      - name: Post cost report as PR comment
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Find existing cost report comment or create new one
-          COMMENT_TAG="<!-- live-api-cost-report -->"
-          PR_NUMBER=${{ github.event.pull_request.number }}
-
-          # Prepend the tag to the report
-          echo "$COMMENT_TAG" > comment-body.md
-          cat cost-report.md >> comment-body.md
-          echo "" >> comment-body.md
-          echo "---" >> comment-body.md
-          echo "*Updated: $(date -u '+%Y-%m-%d %H:%M UTC') | Run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*" >> comment-body.md
-
-          # Check if comment already exists
-          EXISTING_COMMENT_ID=$(gh api \
-            "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq ".[] | select(.body | startswith(\"$COMMENT_TAG\")) | .id" \
-            2>/dev/null | head -1)
-
-          if [ -n "$EXISTING_COMMENT_ID" ]; then
-            gh api \
-              "repos/${{ github.repository }}/issues/comments/${EXISTING_COMMENT_ID}" \
-              -X PATCH \
-              -f body="$(cat comment-body.md)"
-            echo "Updated existing cost report comment #${EXISTING_COMMENT_ID}"
-          else
-            gh api \
-              "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              -f body="$(cat comment-body.md)"
-            echo "Created new cost report comment"
-          fi
+        with:
+          name: acceptance-output
+          path: acceptance-output.txt
 
   # -----------------------------------------------------------------------
   # Per-connector contract tests — on staging→main PRs, ALL connectors
@@ -169,7 +86,13 @@ jobs:
         run: |
           uv run --package unlock-source-access pytest \
             packages/source-access/tests/test_live_api.py \
-            -v -s -m "contract" -k "Unipile" --tb=short
+            -v -s -m "contract" -k "Unipile" --tb=short \
+            2>&1 | tee contract-unipile-output.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contract-unipile-output
+          path: contract-unipile-output.txt
 
   contract-x:
     name: "Contract: X.com"
@@ -186,7 +109,13 @@ jobs:
         run: |
           uv run --package unlock-source-access pytest \
             packages/source-access/tests/test_live_api.py \
-            -v -s -m "contract" -k "XContract" --tb=short
+            -v -s -m "contract" -k "XContract" --tb=short \
+            2>&1 | tee contract-x-output.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contract-x-output
+          path: contract-x-output.txt
 
   contract-posthog:
     name: "Contract: PostHog"
@@ -203,7 +132,13 @@ jobs:
         run: |
           uv run --package unlock-source-access pytest \
             packages/source-access/tests/test_live_api.py \
-            -v -s -m "contract" -k "PostHog" --tb=short
+            -v -s -m "contract" -k "PostHog" --tb=short \
+            2>&1 | tee contract-posthog-output.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contract-posthog-output
+          path: contract-posthog-output.txt
 
   contract-rb2b:
     name: "Contract: RB2B"
@@ -219,4 +154,189 @@ jobs:
         run: |
           uv run --package unlock-source-access pytest \
             packages/source-access/tests/test_live_api.py \
-            -v -s -m "contract" -k "RB2B" --tb=short
+            -v -s -m "contract" -k "RB2B" --tb=short \
+            2>&1 | tee contract-rb2b-output.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contract-rb2b-output
+          path: contract-rb2b-output.txt
+
+  # -----------------------------------------------------------------------
+  # Cost report — aggregates results from ALL jobs and posts a single
+  # auto-updating PR comment with per-test breakdown, status, and costs.
+  #
+  # Cost rates are hardcoded here. Update them when API pricing changes.
+  # -----------------------------------------------------------------------
+  cost-report:
+    name: "Cost Report"
+    needs: [acceptance, contract-unipile, contract-x, contract-posthog, contract-rb2b]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Build cost report
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 << 'PYEOF'
+          import glob, os, re
+
+          # -----------------------------------------------------------------
+          # Cost rates per API request — UPDATE THESE when pricing changes
+          # -----------------------------------------------------------------
+          COST_RATES = {
+              "unipile":         0.00,   # subscription-based
+              "x":               0.01,   # Basic tier ~$100/month for 10K reads
+              "posthog":         0.00,   # free API tier
+              "rb2b_free":       0.00,   # GET /credits is free
+              "rb2b_enrichment": 0.09,   # $9 per 100 credits, 1 credit per call
+          }
+
+          def classify_api(label):
+              low = label.lower()
+              if "unipile" in low:
+                  return "unipile"
+              if "x.com" in low or low.startswith("x "):
+                  return "x"
+              if "posthog" in low:
+                  return "posthog"
+              if "rb2b" in low:
+                  if "smoke" in low or "acceptance" in low:
+                      return "rb2b_free"
+                  return "rb2b_enrichment"
+              return "unipile"
+
+          dollar = "$"
+          rows = []
+          test_statuses = {}
+
+          for path in sorted(glob.glob("*-output.txt")):
+              job = os.path.basename(path).replace("-output.txt", "").replace("-", " ").title()
+              lines = open(path).readlines()
+
+              # Collect test statuses: track current test, match standalone PASSED/FAILED
+              current_test = None
+              for line in lines:
+                  # Test path line: "packages/.../test_live_api.py::TestClass::test_method"
+                  tm = re.search(r"::(\S+::\S+)", line)
+                  if tm:
+                      current_test = tm.group(1)
+                  # Standalone status line (pytest -v -s puts PASSED on its own line)
+                  sm = re.match(r"^(PASSED|FAILED|SKIPPED)", line.strip())
+                  if sm and current_test:
+                      test_statuses[current_test] = sm.group(1)
+                      current_test = None
+                  # Same-line status (no stdout captured)
+                  sm2 = re.search(r"::(\S+::\S+)\s+(PASSED|FAILED|SKIPPED)", line)
+                  if sm2:
+                      test_statuses[sm2.group(1)] = sm2.group(2)
+
+              # Collect request counts and pair with nearby test status
+              for i, line in enumerate(lines):
+                  m = re.search(r"\[(.+?)\] API requests: (\d+)", line)
+                  if not m:
+                      continue
+                  label, count = m.group(1), int(m.group(2))
+                  rate_key = classify_api(label)
+                  cost = count * COST_RATES[rate_key]
+
+                  # Find nearest PASSED/FAILED/SKIPPED after this line
+                  status_str = ""
+                  for j in range(i + 1, min(i + 15, len(lines))):
+                      sm = re.match(r"^(PASSED|FAILED|SKIPPED)", lines[j].strip())
+                      if sm:
+                          s = sm.group(1)
+                          icon = {"PASSED": "✅", "FAILED": "❌", "SKIPPED": "⏭️"}[s]
+                          status_str = icon + " " + s
+                          break
+                      if "API requests:" in lines[j]:
+                          break
+
+                  rows.append((job, label, count, status_str or "—", cost))
+
+          total_requests = sum(r[2] for r in rows)
+          total_cost = sum(r[4] for r in rows)
+          passed = sum(1 for s in test_statuses.values() if s == "PASSED")
+          failed = sum(1 for s in test_statuses.values() if s == "FAILED")
+          skipped = sum(1 for s in test_statuses.values() if s == "SKIPPED")
+          total_tests = len(test_statuses)
+
+          head = os.environ.get("HEAD_SHA", "unknown")
+          run_num = os.environ.get("RUN_NUMBER", "?")
+          run_url = os.environ.get("RUN_URL", "#")
+
+          md = []
+          md.append("## Live API Verification — Cost Report\n")
+          md.append("**Commit:** `%s` | **Run:** [#%s](%s)\n" % (head, run_num, run_url))
+          md.append("### Test Results\n")
+          md.append("| Job | Test | Requests | Status | Est. Cost |")
+          md.append("|-----|------|----------|--------|-----------|")
+          for job, label, reqs, status, cost in rows:
+              md.append("| %s | %s | %d | %s | %s%.2f |" % (job, label, reqs, status, dollar, cost))
+
+          md.append("")
+          md.append("### Summary\n")
+          md.append("| Metric | Value |")
+          md.append("|--------|-------|")
+          md.append("| Total tests | %d |" % total_tests)
+          md.append("| Passed | %d |" % passed)
+          md.append("| Failed | %d |" % failed)
+          md.append("| Skipped | %d |" % skipped)
+          md.append("| Total API requests | %d |" % total_requests)
+          md.append("| **Estimated cost this run** | **%s%.2f** |" % (dollar, total_cost))
+
+          md.append("")
+          md.append("<details><summary>Cost rates (update when API pricing changes)</summary>\n")
+          md.append("| API | Rate | Notes |")
+          md.append("|-----|------|-------|")
+          md.append("| Unipile | %s0.00/req | Subscription-based |" % dollar)
+          md.append("| X.com | %s0.01/req | Basic tier (~%s100/10K reads) |" % (dollar, dollar))
+          md.append("| PostHog | %s0.00/req | Free API tier |" % dollar)
+          md.append("| RB2B (credits check) | %s0.00 | GET /credits is free |" % dollar)
+          md.append("| RB2B (enrichment) | %s0.09/credit | %s9 per 100 credits |" % (dollar, dollar))
+          md.append("\n</details>")
+
+          report = "\n".join(md)
+          print(report)
+          with open("cost-report.md", "w") as f:
+              f.write(report)
+          PYEOF
+
+      - name: Post cost report as PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_TAG="<!-- live-api-cost-report -->"
+          PR_NUMBER=${{ github.event.pull_request.number }}
+
+          echo "$COMMENT_TAG" > comment-body.md
+          cat cost-report.md >> comment-body.md
+          echo "" >> comment-body.md
+          echo "---" >> comment-body.md
+          echo "*Updated: $(date -u '+%Y-%m-%d %H:%M UTC')*" >> comment-body.md
+
+          # Find existing cost report comment or create new one
+          EXISTING_COMMENT_ID=$(gh api \
+            "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.body | startswith(\"$COMMENT_TAG\")) | .id" \
+            2>/dev/null | head -1)
+
+          if [ -n "$EXISTING_COMMENT_ID" ]; then
+            gh api \
+              "repos/${{ github.repository }}/issues/comments/${EXISTING_COMMENT_ID}" \
+              -X PATCH \
+              -f body="$(cat comment-body.md)"
+            echo "Updated existing cost report comment #${EXISTING_COMMENT_ID}"
+          else
+            gh api \
+              "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              -f body="$(cat comment-body.md)"
+            echo "Created new cost report comment"
+          fi
