@@ -8,7 +8,12 @@ name: "Live API Verification"
 # and parsing bugs that mocked tests cannot.
 #
 # Runs on: PRs targeting main (i.e., staging → main promotion)
-# Cost: ~$0.02 per full run, safe at x100 = ~$2.00
+#
+# RULE: staging→main PRs MUST have all green lights including zero skips.
+#       No test may be skipped — every connector must be fully operational.
+#
+# Cost tracking: Every test run posts/updates a PR comment with actual
+# API request counts and estimated costs per connector.
 #
 # Terminology (for searchability):
 #   - Broad integration tests (Martin Fowler)
@@ -19,52 +24,16 @@ on:
   pull_request:
     branches: [main]
 
-jobs:
-  # -----------------------------------------------------------------------
-  # Detect which connectors have changed files — gates the per-connector
-  # contract tests so we only spend API credits on connectors that changed.
-  # -----------------------------------------------------------------------
-  detect-changes:
-    name: Detect changed connectors
-    runs-on: ubuntu-latest
-    outputs:
-      unipile: ${{ steps.filter.outputs.unipile }}
-      x: ${{ steps.filter.outputs.x }}
-      posthog: ${{ steps.filter.outputs.posthog }}
-      rb2b: ${{ steps.filter.outputs.rb2b }}
-      shared: ${{ steps.filter.outputs.shared }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            unipile:
-              - 'packages/source-access/src/unlock_source_access/connectors/unipile.py'
-              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
-              - 'packages/shared/src/unlock_shared/source_models.py'
-            x:
-              - 'packages/source-access/src/unlock_source_access/connectors/x.py'
-              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
-              - 'packages/shared/src/unlock_shared/source_models.py'
-            posthog:
-              - 'packages/source-access/src/unlock_source_access/connectors/posthog.py'
-              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
-              - 'packages/shared/src/unlock_shared/source_models.py'
-            rb2b:
-              - 'packages/source-access/src/unlock_source_access/connectors/rb2b.py'
-              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
-              - 'packages/shared/src/unlock_shared/source_models.py'
-            shared:
-              - 'packages/source-access/src/unlock_source_access/connectors/base.py'
-              - 'packages/source-access/src/unlock_source_access/activities.py'
-              - 'packages/shared/src/unlock_shared/source_models.py'
+permissions:
+  pull-requests: write
+  contents: read
 
+jobs:
   # -----------------------------------------------------------------------
   # System-wide acceptance test — runs on EVERY staging→main PR regardless
   # of file changes. This is the cheapest possible "are all services alive?"
-  # gate (~$0.00, auth checks only). Catches credential expiration and
-  # API outages that happen independently of code changes.
+  # gate. Catches credential expiration and API outages that happen
+  # independently of code changes.
   # -----------------------------------------------------------------------
   acceptance:
     name: "Acceptance: all connectors healthy"
@@ -85,18 +54,108 @@ jobs:
           POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
           RB2B_API_KEY: ${{ secrets.RB2B_API_KEY }}
         run: |
-          uv run pytest packages/source-access/tests/test_live_api.py \
-            -v -m "acceptance" --tb=short
+          uv run --package unlock-source-access pytest \
+            packages/source-access/tests/test_live_api.py \
+            -v -s -m "acceptance" --tb=short \
+            --junit-xml=acceptance-results.xml 2>&1 | tee acceptance-output.txt
+
+      - name: Parse and report costs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Extract request counts from pytest output
+          echo "## Live API Verification — Cost Report" > cost-report.md
+          echo "" >> cost-report.md
+          echo "**Run:** acceptance | **Trigger:** \`${{ github.event.pull_request.head.sha }}\`" >> cost-report.md
+          echo "" >> cost-report.md
+          echo "| Test | API Requests | Status |" >> cost-report.md
+          echo "|------|-------------|--------|" >> cost-report.md
+
+          total_requests=0
+          while IFS= read -r line; do
+            if echo "$line" | grep -q "API requests:"; then
+              label=$(echo "$line" | sed 's/.*\[\(.*\)\] API requests:.*/\1/')
+              count=$(echo "$line" | sed 's/.*API requests: \([0-9]*\).*/\1/')
+              total_requests=$((total_requests + count))
+              echo "| $label | $count | — |" >> cost-report.md
+            fi
+          done < acceptance-output.txt
+
+          # Extract pass/fail/skip from pytest output
+          while IFS= read -r line; do
+            if echo "$line" | grep -qE "PASSED|FAILED|SKIPPED"; then
+              test_name=$(echo "$line" | sed 's/.*::\(.*\) .*/\1/')
+              if echo "$line" | grep -q "PASSED"; then
+                status="PASSED"
+              elif echo "$line" | grep -q "FAILED"; then
+                status="FAILED"
+              elif echo "$line" | grep -q "SKIPPED"; then
+                status="SKIPPED"
+              fi
+            fi
+          done < acceptance-output.txt
+
+          echo "" >> cost-report.md
+          echo "**Total API requests this run:** $total_requests" >> cost-report.md
+          echo "" >> cost-report.md
+
+          # Estimated costs (conservative per-request estimates)
+          echo "<details><summary>Cost estimates (per-request basis)</summary>" >> cost-report.md
+          echo "" >> cost-report.md
+          echo "| API | Est. per request | Notes |" >> cost-report.md
+          echo "|-----|-----------------|-------|" >> cost-report.md
+          echo "| Unipile | \$0.00 | Subscription-based |" >> cost-report.md
+          echo "| X.com | ~\$0.005 | Basic tier pricing |" >> cost-report.md
+          echo "| PostHog | \$0.00 | Free API tier |" >> cost-report.md
+          echo "| RB2B | 1 credit | Credit-based |" >> cost-report.md
+          echo "" >> cost-report.md
+          echo "</details>" >> cost-report.md
+
+          cat cost-report.md
+
+      - name: Post cost report as PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find existing cost report comment or create new one
+          COMMENT_TAG="<!-- live-api-cost-report -->"
+          PR_NUMBER=${{ github.event.pull_request.number }}
+
+          # Prepend the tag to the report
+          echo "$COMMENT_TAG" > comment-body.md
+          cat cost-report.md >> comment-body.md
+          echo "" >> comment-body.md
+          echo "---" >> comment-body.md
+          echo "*Updated: $(date -u '+%Y-%m-%d %H:%M UTC') | Run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*" >> comment-body.md
+
+          # Check if comment already exists
+          EXISTING_COMMENT_ID=$(gh api \
+            "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.body | startswith(\"$COMMENT_TAG\")) | .id" \
+            2>/dev/null | head -1)
+
+          if [ -n "$EXISTING_COMMENT_ID" ]; then
+            gh api \
+              "repos/${{ github.repository }}/issues/comments/${EXISTING_COMMENT_ID}" \
+              -X PATCH \
+              -f body="$(cat comment-body.md)"
+            echo "Updated existing cost report comment #${EXISTING_COMMENT_ID}"
+          else
+            gh api \
+              "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              -f body="$(cat comment-body.md)"
+            echo "Created new cost report comment"
+          fi
 
   # -----------------------------------------------------------------------
-  # Per-connector contract tests — only run when that connector's code
-  # changed. These are tier 2 (minimal data fetch + shape validation),
-  # slightly more expensive than smoke but still very cheap.
+  # Per-connector contract tests — on staging→main PRs, ALL connectors
+  # are tested regardless of which files changed. This is the final gate
+  # before production. No skips allowed.
   # -----------------------------------------------------------------------
   contract-unipile:
     name: "Contract: Unipile"
-    needs: detect-changes
-    if: needs.detect-changes.outputs.unipile == 'true' || needs.detect-changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -108,13 +167,12 @@ jobs:
           UNIPILE_API_KEY: ${{ secrets.UNIPILE_API_KEY }}
           UNIPILE_DSN: ${{ secrets.UNIPILE_DSN }}
         run: |
-          uv run pytest packages/source-access/tests/test_live_api.py \
-            -v -m "contract" -k "Unipile" --tb=short
+          uv run --package unlock-source-access pytest \
+            packages/source-access/tests/test_live_api.py \
+            -v -s -m "contract" -k "Unipile" --tb=short
 
   contract-x:
     name: "Contract: X.com"
-    needs: detect-changes
-    if: needs.detect-changes.outputs.x == 'true' || needs.detect-changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -126,13 +184,12 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_USERNAME: ${{ secrets.X_USERNAME }}
         run: |
-          uv run pytest packages/source-access/tests/test_live_api.py \
-            -v -m "contract" -k "XContract" --tb=short
+          uv run --package unlock-source-access pytest \
+            packages/source-access/tests/test_live_api.py \
+            -v -s -m "contract" -k "XContract" --tb=short
 
   contract-posthog:
     name: "Contract: PostHog"
-    needs: detect-changes
-    if: needs.detect-changes.outputs.posthog == 'true' || needs.detect-changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -144,13 +201,12 @@ jobs:
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
           POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
         run: |
-          uv run pytest packages/source-access/tests/test_live_api.py \
-            -v -m "contract" -k "PostHog" --tb=short
+          uv run --package unlock-source-access pytest \
+            packages/source-access/tests/test_live_api.py \
+            -v -s -m "contract" -k "PostHog" --tb=short
 
   contract-rb2b:
     name: "Contract: RB2B"
-    needs: detect-changes
-    if: needs.detect-changes.outputs.rb2b == 'true' || needs.detect-changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -161,5 +217,6 @@ jobs:
         env:
           RB2B_API_KEY: ${{ secrets.RB2B_API_KEY }}
         run: |
-          uv run pytest packages/source-access/tests/test_live_api.py \
-            -v -m "contract" -k "RB2B" --tb=short
+          uv run --package unlock-source-access pytest \
+            packages/source-access/tests/test_live_api.py \
+            -v -s -m "contract" -k "RB2B" --tb=short

@@ -129,12 +129,9 @@ EXTERNAL_FAILURE_PATTERNS = {
     # Account disconnected on provider side (Unipile returns 422 or similar)
     "account_disconnected": ["disconnected", "not connected", "connection expired"],
     # No API credits remaining
-    "no_credits": ["insufficient credits", "credit limit", "credits_remaining"],
+    "no_credits": ["insufficient credits", "credit limit", "no credits"],
     # Rate limiting (not a code bug, just need to slow down)
     "rate_limited": ["rate limit", "too many requests", "429"],
-    # Endpoint not activated for this API key (e.g. RB2B returns 404 when
-    # no API endpoints are enabled for the key — account config issue)
-    "endpoint_not_activated": ["404 not found"],
 }
 
 
@@ -254,16 +251,14 @@ class TestPostHogSmoke:
 @requires_rb2b
 @pytest.mark.smoke
 class TestRB2BSmoke:
-    """Verify RB2B API key is valid and has activated endpoints.
+    """Verify RB2B API key is valid via the credits endpoint.
 
-    RB2B is credit-based. The account/status endpoint tells us whether the
-    API key has any active endpoints. If the key exists but no endpoints are
-    activated, the API returns an HTTP error — this is a real failure, not
-    something to silently accept.
+    RB2B is credit-based. GET /credits validates the API key and returns
+    the remaining credit balance without consuming any credits.
     """
 
     async def test_auth_and_connectivity(self):
-        """GET /account/status — 1 request, no credits consumed."""
+        """GET /credits — 1 request, no credits consumed."""
         config = SourceConfig(
             source_id="live-smoke-rb2b",
             source_type="rb2b",
@@ -274,6 +269,10 @@ class TestRB2BSmoke:
             result = await connector.connect()
             _report_requests(connector, "RB2B smoke")
             _assert_success_or_external_failure(result, "RB2B")
+            if result.success:
+                assert result.data, "Expected credit balance in response"
+                credits = result.data.get("credits_remaining")
+                print(f"  RB2B credits remaining: {credits}")
         finally:
             await connector.close()
 
@@ -524,41 +523,49 @@ class TestPostHogContract:
 @requires_rb2b
 @pytest.mark.contract
 class TestRB2BContract:
-    """Verify RB2B response shapes match our parsing code.
+    """Verify RB2B enrichment API response shapes match our parsing code.
 
-    RB2B is credit-based. If the account has no activated endpoints,
-    the smoke test will catch that. Contract tests only run if smoke passes.
+    RB2B is credit-based — each enrichment call consumes credits. We test
+    ip_to_hem with a documentation example IP to validate response shape.
+    Cost: 1 credit per call.
     """
 
-    async def test_fetch_visitors_shape(self):
-        """Fetch 1 page of visitors and validate normalized record fields.
+    async def test_enrich_ip_to_hem_shape(self):
+        """POST /ip_to_hem — validate enrichment response shape.
 
-        1 request. Credit-based — minimal credit usage.
+        1 request. Costs 1 credit. Uses a documentation example IP address
+        which may return empty results — either way validates the shape.
         """
         config = SourceConfig(
             source_id="live-contract-rb2b",
             source_type="rb2b",
             auth_env_var="RB2B_API_KEY",
+            config_json=json.dumps({"ip_address": "162.192.6.240"}),
         )
         request = FetchRequest(
             source_id="live-contract-rb2b",
             source_type="rb2b",
-            resource_type="visitors",
+            resource_type="ip_to_hem",
             auth_env_var="RB2B_API_KEY",
+            config_json=json.dumps({"ip_address": "162.192.6.240"}),
             max_pages=1,
         )
         connector = get_connector(config)
         try:
             result = await connector.fetch_data(request)
-            _report_requests(connector, "RB2B contract/visitors")
-            _assert_success_or_external_failure(result, "RB2B visitors")
+            _report_requests(connector, "RB2B contract/ip_to_hem")
+            _assert_success_or_external_failure(result, "RB2B ip_to_hem")
 
+            # Response may be empty (no match for this IP) — that's OK.
+            # When results exist, validate the response shape.
             if result.success and result.records:
                 record = result.records[0]
-                expected_fields = {"id", "email", "first_name", "last_name", "company"}
+                expected_fields = {"md5", "score"}
                 actual_fields = set(record.keys())
                 missing = expected_fields - actual_fields
-                assert not missing, f"RB2B visitor missing fields: {missing}"
+                assert not missing, f"RB2B ip_to_hem missing fields: {missing}"
+                # API returns score as string (e.g. "0.844"), not float as docs suggest
+                assert float(record["score"]), "score must be parseable as a number"
         finally:
             await connector.close()
 
