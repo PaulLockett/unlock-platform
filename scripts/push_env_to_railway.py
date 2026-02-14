@@ -72,6 +72,8 @@ VAR_ROUTING: dict[str, list[str]] = {
     "POSTHOG_API_KEY": ["source-access"],
     "POSTHOG_PROJECT_ID": ["source-access"],
     "RB2B_API_KEY": ["source-access"],
+    # Data Access — Supabase direct connection
+    "SUPABASE_DB_URL": ["data-access"],
     # LLM Gateway
     "OPENROUTER_API_KEY": ["llm-gateway"],
     # Temporal — shared infrastructure, every worker needs these
@@ -90,7 +92,6 @@ SKIP_VARS = {
     "SUPABASE_URL",
     "SUPABASE_ANON_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
-    "SUPABASE_DB_URL",
 }
 
 
