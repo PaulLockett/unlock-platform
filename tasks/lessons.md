@@ -332,3 +332,24 @@ to production.
 **Rule:** Never run `supabase db push` without first validating the migration locally via
 `supabase db reset`. Local reset tests the full migration chain from scratch — if it succeeds
 locally, it will succeed in production.
+
+## 2026-02-18: Supabase CLI config.toml version drift breaks CI
+
+**Problem:** `supabase link` and `supabase db push` failed in CI with config parsing errors.
+Local Supabase CLI (newer) auto-generates config keys (`oauth_server`, `web3`, `storage.vector`,
+`major_version: 17`) that the CI CLI version doesn't recognize.
+
+**Root cause:** `supabase/setup-cli@v1` installs a CLI version that lags behind the local
+version. The CLI validates the entire `config.toml` on every command, even when config values
+are irrelevant to the operation (e.g., `major_version` doesn't matter for `db push --db-url`).
+
+**Fix (three-part):**
+1. Removed unsupported auto-generated keys (web3, oauth_server, storage.analytics/vector, etc.)
+2. Set `major_version = 15` (only affects local Docker image, not remote db push)
+3. Replaced `supabase link` + `supabase db push` with `supabase db push --db-url` — bypasses
+   config.toml dependency on project linking entirely
+
+**Rule:** For CI/CD migrations, use `supabase db push --db-url "$SUPABASE_DB_URL"` instead of
+`supabase link` + `supabase db push`. It's simpler (one secret instead of three), avoids
+config.toml parsing issues, and doesn't require `SUPABASE_ACCESS_TOKEN` or `SUPABASE_DB_PASSWORD`.
+Keep `config.toml` conservative — remove auto-generated keys for features you don't use.
