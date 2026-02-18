@@ -31,7 +31,9 @@ port = 54342
 shadow_port = 54340
 # The database major version to use. This has to be the same as your remote database's. Run `SHOW
 # server_version;` on the remote database to check.
-major_version = 17
+# Remote DB runs PG 17. Set to 15 for Supabase CLI compatibility in CI
+# (major_version only affects local Docker image, not db push to remote).
+major_version = 15
 
 [db.pooler]
 enabled = false
