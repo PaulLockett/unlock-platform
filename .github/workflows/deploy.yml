@@ -21,17 +21,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Supabase migrations
-      # TODO: Uncomment when Supabase project is created
-      # - name: Install Supabase CLI
-      #   uses: supabase/setup-cli@v1
-      # - name: Push migrations
-      #   run: supabase db push
-      #   env:
-      #     SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      #     SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      # Supabase migrations — apply pending migrations to production
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+      - name: Link Supabase project
+        run: supabase link --project-ref iabmwjrlbiyetasiiiht
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      - name: Push migrations
+        run: supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
       # Railway and Vercel auto-deploy from main via their GitHub integrations.
       # No explicit deploy step needed here — just ensure CI passes first.
       - name: Deploy marker
         run: echo "CI passed — Railway and Vercel will auto-deploy from main"
+
+  sync-env:
+    name: Sync env vars to production
+    needs: gate
+    uses: ./.github/workflows/sync-env.yml
+    with:
+      environment: production
+    secrets: inherit

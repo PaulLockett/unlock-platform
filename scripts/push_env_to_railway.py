@@ -1,25 +1,33 @@
 """Push environment variables from .env to Railway services via GraphQL API.
 
-Reads the local .env file and upserts variables onto the correct Railway
-services in the specified environment. This replaces GUI-based variable
-management — any developer (or CI) can run this script to sync secrets.
+Reads variables from a .env file and/or OS environment, then upserts them
+onto the correct Railway services in the specified environment. This replaces
+GUI-based variable management — any developer (or CI) can run this script
+to sync secrets.
 
 Variable routing:
   - Source connector keys → source-access service
   - LLM keys → llm-gateway service
   - Temporal keys → ALL services (shared infrastructure)
+  - Supabase keys → data-access service
 
 The script skips local-only variables (HONCHO_*, MONDAY_TOKEN, EXA_API_KEY)
 since those aren't needed by Railway workers.
 
-Usage:
+Usage (local — reads .env file, auth from Railway CLI):
   python scripts/push_env_to_railway.py                    # defaults to staging
   python scripts/push_env_to_railway.py --env production   # target production
   python scripts/push_env_to_railway.py --dry-run          # preview without pushing
 
-Prerequisites:
+Usage (CI — reads OS environment, auth from RAILWAY_TOKEN env var):
+  python scripts/push_env_to_railway.py --env production --from-env
+
+Prerequisites (local):
   - Railway CLI authenticated (`railway login`)
   - .env file populated with the keys you want to push
+Prerequisites (CI):
+  - RAILWAY_TOKEN environment variable set
+  - Routed vars set as environment variables
 """
 
 from __future__ import annotations
@@ -72,6 +80,8 @@ VAR_ROUTING: dict[str, list[str]] = {
     "POSTHOG_API_KEY": ["source-access"],
     "POSTHOG_PROJECT_ID": ["source-access"],
     "RB2B_API_KEY": ["source-access"],
+    # Data Access — Supabase direct connection
+    "SUPABASE_DB_URL": ["data-access"],
     # LLM Gateway
     "OPENROUTER_API_KEY": ["llm-gateway"],
     # Temporal — shared infrastructure, every worker needs these
@@ -90,7 +100,6 @@ SKIP_VARS = {
     "SUPABASE_URL",
     "SUPABASE_ANON_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
-    "SUPABASE_DB_URL",
 }
 
 
@@ -113,11 +122,32 @@ def parse_env_file(path: Path) -> dict[str, str]:
     return env
 
 
+def collect_from_environment() -> dict[str, str]:
+    """Collect routed variables from OS environment (for CI)."""
+    import os
+
+    env: dict[str, str] = {}
+    for var_name in VAR_ROUTING:
+        value = os.environ.get(var_name)
+        if value:
+            env[var_name] = value
+    return env
+
+
 def get_railway_token() -> str:
-    """Read the Railway auth token from the CLI config."""
+    """Read the Railway auth token from env var or CLI config."""
+    import os
+
+    # CI: RAILWAY_TOKEN env var takes priority
+    token = os.environ.get("RAILWAY_TOKEN", "")
+    if token:
+        return token
+
+    # Local: fall back to Railway CLI config
     config_path = Path.home() / ".railway" / "config.json"
     if not config_path.exists():
         print("ERROR: Railway CLI not authenticated. Run `railway login` first.", file=sys.stderr)
+        print("  Or set RAILWAY_TOKEN environment variable for CI usage.", file=sys.stderr)
         sys.exit(1)
     config = json.loads(config_path.read_text())
     token = config.get("user", {}).get("token", "")
@@ -205,17 +235,26 @@ def main() -> None:
         default=".env",
         help="Path to .env file (default: .env in project root)",
     )
+    parser.add_argument(
+        "--from-env",
+        action="store_true",
+        help="Read variables from OS environment instead of .env file (for CI)",
+    )
     args = parser.parse_args()
 
-    # Resolve paths relative to project root (parent of scripts/)
-    project_root = Path(__file__).resolve().parent.parent
-    env_path = project_root / args.env_file
-    if not env_path.exists():
-        print(f"ERROR: {env_path} not found", file=sys.stderr)
-        sys.exit(1)
-
     env_id = ENVIRONMENTS[args.env]
-    env_vars = parse_env_file(env_path)
+
+    if args.from_env:
+        env_vars = collect_from_environment()
+        source_label = "OS environment"
+    else:
+        project_root = Path(__file__).resolve().parent.parent
+        env_path = project_root / args.env_file
+        if not env_path.exists():
+            print(f"ERROR: {env_path} not found", file=sys.stderr)
+            sys.exit(1)
+        env_vars = parse_env_file(env_path)
+        source_label = str(env_path)
 
     # Build per-service variable batches
     # service_name → {var_name: var_value}
@@ -238,7 +277,7 @@ def main() -> None:
 
     # Report plan
     print(f"Target: {args.env} ({env_id})")
-    print(f"Source: {env_path}")
+    print(f"Source: {source_label}")
     print()
 
     for svc_name, svc_vars in sorted(batches.items()):
