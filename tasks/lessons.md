@@ -202,3 +202,133 @@ to handle both string and numeric representations.
 
 **Rule:** Never trust example responses in API documentation for type assertions. Contract tests should
 be resilient to string↔number coercion since many APIs are inconsistent about JSON types.
+
+## 2026-02-13: Railway auto-deploys on push regardless of CI status
+
+**Problem:** After merging staging→main, Railway immediately deploys the new code — it doesn't wait
+for GitHub Actions CI to pass. If CI fails (or the code has a runtime bug CI doesn't catch), Railway
+serves broken code until someone manually rolls back.
+
+**Root cause:** Railway deployment triggers have a `checkSuites` flag that defaults to `false`. When
+false, Railway deploys on any push to the connected branch. When true, Railway waits for all GitHub
+check suites to pass before deploying.
+
+**Fix:** Created `scripts/enable_check_suites.py` to query and update deployment triggers via Railway's
+GraphQL API. Run once per environment: `python scripts/enable_check_suites.py --env production`.
+
+**Rule:** After connecting Railway services to GitHub, always enable `checkSuites: true` on deployment
+triggers. Without it, CI is advisory — Railway deploys regardless of test results.
+
+## 2026-02-13: Post-deploy verification requires polling Railway's deployment status
+
+**Problem:** GitHub Actions doesn't know when Railway finishes deploying. A smoke test that runs
+immediately after the merge commit would test the *old* deployment, not the new one.
+
+**Fix:** Created `scripts/poll_railway_deploy.py` that polls Railway's GraphQL API every 30s until
+all services reach a terminal state (SUCCESS, FAILED, CRASHED). The post-deploy smoke test workflow
+gates on this poller before running acceptance tests.
+
+**Rule:** When building post-deploy verification for async deployment platforms (Railway, Vercel, etc.),
+always poll for deployment completion before running health checks. Don't assume "push = deployed."
+
+## 2026-02-14: Resource Access must NOT modify Manager workflows
+
+**Problem:** Initial DATA_ACC plan included changes to `ingest.py` and `query.py` (Manager workflows)
+to wire the new business verb activities directly.
+
+**Root cause:** Misunderstanding of Righting Software's encapsulation of volatility. Resource Access
+components encapsulate WHERE data lives. Manager components encapsulate WHAT workflows orchestrate.
+If Resource Access changes force Manager changes, the volatility isn't properly encapsulated.
+
+**Fix:** DATA_ACC exposes 10 new activities on `DATA_ACCESS_QUEUE` alongside the existing `hello_store_data`
+shim. Manager workflows are untouched. When DATA_MGR is implemented (its turn on the critical path),
+it will wire workflows to the new activities.
+
+**Rule:** Resource Access components must be independently deployable. Adding new data operations should
+never require modifying Manager workflow code — that's a layer boundary violation.
+
+## 2026-02-14: Business verbs must survive storage technology change
+
+**Problem:** Early designs used CRUD-like names (`insert_person`, `update_engagement`, `query_content`)
+for Resource Access activities.
+
+**Root cause:** Naming by implementation (SQL operations) instead of by domain intent. If we switched
+from PostgreSQL to a graph database, "insert_person" stops making sense.
+
+**Fix:** Applied the Righting Software test: "If I switched from PostgreSQL to a graph database,
+would this operation name still make sense?" Final verbs: `identify_contact`, `catalog_content`,
+`record_engagement`, `log_communication`, `register_participation`, `enroll_member`, `profile_contact`,
+`survey_engagement`, `open_pipeline_run`, `close_pipeline_run`.
+
+**Rule:** Resource Access activity names should be technology-agnostic business verbs. If the name
+includes a storage operation (insert, update, query, select), it belongs in the implementation, not
+the interface.
+
+## 2026-02-14: SQLAlchemy Core over supabase-py for Temporal workers
+
+**Problem:** Needed to choose between raw asyncpg, supabase-py, SQLAlchemy Core, or full ORM for
+23-table schema interactions from Temporal activity workers.
+
+**Decision:** SQLAlchemy Core + asyncpg. Typed table definitions catch column typos at import time.
+Query builder prevents SQL injection. Full SQL control (ON CONFLICT, CTEs, window functions). True
+async (no event loop blocking in Temporal workers). No ORM overhead (no identity map, no lazy loading).
+
+**Rejected alternatives:**
+- `supabase-py`: No async support, HTTP hop through PostgREST, limited upsert control
+- Raw `asyncpg`: No column-level type safety, string-based SQL
+- Full ORM: Two sources of truth with Supabase migrations, awkward for complex upserts/temporal joins
+
+**Rule:** For Temporal workers with complex schema interactions, SQLAlchemy Core + asyncpg is the
+sweet spot. Types without ORM overhead. Use Supabase migrations as the schema source of truth;
+SQLAlchemy Table objects mirror it in Python.
+
+## 2026-02-14: No JSONB placeholders — enumerate all columns explicitly
+
+**Problem:** Temptation to use JSONB columns for "flexible" data like PostHog custom properties or
+RB2B enrichment fields.
+
+**Root cause:** JSONB hides schema — queries can't be validated at write time, no foreign keys,
+no type checking, difficult to index. "Flexible" really means "I haven't designed the schema yet."
+
+**Fix:** 23 tables with every column explicitly typed. Source-specific fields from Unipile, X,
+PostHog, and RB2B mapped to normalized columns. The one case where JSONB would be unavoidable
+(PostHog's arbitrary custom event properties) is handled by TRANS_ENG at transformation time.
+
+**Rule:** DATA_ACC never stores raw JSONB blobs. If a field seems like it needs JSONB, either
+(a) design explicit columns for the known variants, or (b) delegate the dynamic handling to
+TRANS_ENG which extracts known properties into explicit columns.
+
+## 2026-02-14: Temporal history tables for past state simulation
+
+**Problem:** People's names, emails, phones, and locations change over time and differ across
+platforms. A single scalar column (e.g., `people.email`) loses all history.
+
+**Fix:** Dedicated one-to-many history tables (`person_names`, `person_emails`, `person_phones`,
+`person_locations`, `organization_locations`) with `observed_at` / `superseded_at` temporal fields.
+The `people` table keeps `display_name` and `primary_email` as denormalized caches to avoid JOINs
+on every contact list query.
+
+**Pattern:**
+```sql
+-- What was this person's email on 2026-01-15?
+SELECT * FROM person_emails
+WHERE person_id = ? AND observed_at <= '2026-01-15'
+  AND (superseded_at IS NULL OR superseded_at > '2026-01-15')
+```
+
+**Rule:** For contact data that changes over time, model as one-to-many history tables with
+temporal fields — not scalar columns, not change-summary audit logs. This enables full temporal
+profiles, past state simulation, and cross-platform identity resolution.
+
+## 2026-02-14: Always validate migrations locally before pushing to production
+
+**Problem:** Risk of applying broken SQL to production Supabase, which could corrupt schema or
+leave the database in an inconsistent state.
+
+**Fix:** Local-first validation workflow: `supabase start` → write migration → `supabase db reset`
+(drops and recreates local DB from scratch) → verify tables/seeds via psql → then `supabase db push`
+to production.
+
+**Rule:** Never run `supabase db push` without first validating the migration locally via
+`supabase db reset`. Local reset tests the full migration chain from scratch — if it succeeds
+locally, it will succeed in production.
