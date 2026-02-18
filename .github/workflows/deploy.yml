@@ -38,3 +38,11 @@ jobs:
       # No explicit deploy step needed here — just ensure CI passes first.
       - name: Deploy marker
         run: echo "CI passed — Railway and Vercel will auto-deploy from main"
+
+  sync-env:
+    name: Sync env vars to production
+    needs: gate
+    uses: ./.github/workflows/sync-env.yml
+    with:
+      environment: production
+    secrets: inherit
