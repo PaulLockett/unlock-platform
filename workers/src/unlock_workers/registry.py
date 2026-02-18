@@ -18,19 +18,7 @@ from typing import Any
 
 from unlock_access_engine.activities import hello_check_access
 from unlock_config_access.activities import hello_load_config
-from unlock_data_access.activities import (
-    catalog_content,
-    close_pipeline_run,
-    enroll_member,
-    hello_store_data,
-    identify_contact,
-    log_communication,
-    open_pipeline_run,
-    profile_contact,
-    record_engagement,
-    register_participation,
-    survey_engagement,
-)
+from unlock_data_access.activities import hello_store_data
 from unlock_data_manager.workflows.configure import ConfigureWorkflow
 from unlock_data_manager.workflows.ingest import IngestWorkflow
 from unlock_data_manager.workflows.query import QueryWorkflow
@@ -81,19 +69,7 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "data-access": ComponentConfig(
         task_queue=DATA_ACCESS_QUEUE,
-        activities=[
-            hello_store_data,
-            identify_contact,
-            catalog_content,
-            record_engagement,
-            log_communication,
-            register_participation,
-            enroll_member,
-            profile_contact,
-            survey_engagement,
-            open_pipeline_run,
-            close_pipeline_run,
-        ],
+        activities=[hello_store_data],
     ),
     "config-access": ComponentConfig(
         task_queue=CONFIG_ACCESS_QUEUE,
