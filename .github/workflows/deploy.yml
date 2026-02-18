@@ -26,7 +26,12 @@ jobs:
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v1
       - name: Push migrations
-        run: supabase db push --db-url "$SUPABASE_DB_URL"
+        run: |
+          # Resolve hostname to IPv4 — GitHub Actions runners lack IPv6 connectivity
+          # to Supabase's direct database endpoint
+          IPV4=$(getent ahostsv4 db.iabmwjrlbiyetasiiiht.supabase.co | head -1 | awk '{print $1}')
+          DB_URL=$(echo "$SUPABASE_DB_URL" | sed "s|db.iabmwjrlbiyetasiiiht.supabase.co|${IPV4}|")
+          supabase db push --db-url "$DB_URL"
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
 
