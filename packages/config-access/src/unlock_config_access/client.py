@@ -41,11 +41,7 @@ class RedisTransaction:
         return self
 
     def zadd(self, key: str, mapping: dict[str, float]) -> RedisTransaction:
-        if self._is_upstash:
-            for member, score in mapping.items():
-                self._tx.zadd(key, {"member": member, "score": score})
-        else:
-            self._tx.zadd(key, mapping)
+        self._tx.zadd(key, mapping)
         return self
 
     def sadd(self, key: str, *members: str) -> RedisTransaction:
@@ -88,11 +84,8 @@ class RedisAdapter:
         await self._client.delete(*keys)
 
     async def zadd(self, key: str, mapping: dict[str, float]) -> None:
-        if self._is_upstash:
-            for member, score in mapping.items():
-                await self._client.zadd(key, {"member": member, "score": score})
-        else:
-            await self._client.zadd(key, mapping)
+        """Add members to a sorted set. Both Upstash SDK and redis-py accept {member: score}."""
+        await self._client.zadd(key, mapping)
 
     async def zrangebyscore(
         self, key: str, min_score: float, max_score: float, start: int = 0, num: int = -1
