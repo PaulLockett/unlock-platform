@@ -1,0 +1,165 @@
+name: Upstash Bot
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  preview:
+    name: Upstash — preview database
+    runs-on: ubuntu-latest
+    env:
+      DB_NAME: unlock-config-pr-${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # -- Create or reuse database on open/sync --
+      - name: Create or reuse preview database
+        if: github.event.action != 'closed'
+        id: create
+        env:
+          UPSTASH_EMAIL: ${{ secrets.UPSTASH_EMAIL }}
+          UPSTASH_API_KEY: ${{ secrets.UPSTASH_API_KEY }}
+        run: |
+          # Check if database already exists (reuse on synchronize)
+          EXISTING=$(curl -s -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
+            https://api.upstash.com/v2/redis/databases | \
+            python3 -c "
+          import json, sys
+          dbs = json.load(sys.stdin)
+          for db in dbs:
+              if db.get('database_name') == '${{ env.DB_NAME }}':
+                  print(json.dumps(db))
+                  break
+          " 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "♻️  Reusing existing database ${{ env.DB_NAME }}"
+            REST_URL="https://$(echo "$EXISTING" | python3 -c 'import json,sys; print(json.load(sys.stdin)["endpoint"])')"
+            REST_TOKEN=$(echo "$EXISTING" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rest_token"])')
+          else
+            echo "Creating database ${{ env.DB_NAME }}..."
+            RESPONSE=$(curl -s -X POST \
+              -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"name": "${{ env.DB_NAME }}", "region": "global", "primary_region": "us-east-1", "read_regions": [], "tls": true}' \
+              https://api.upstash.com/v2/redis/database)
+
+            # Validate response before parsing
+            echo "$RESPONSE" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          if isinstance(data, str):
+              print(f'API error: {data}', file=sys.stderr)
+              sys.exit(1)
+          if 'error' in data:
+              print(f'API error: {data[\"error\"]}', file=sys.stderr)
+              sys.exit(1)
+          " || exit 1
+
+            REST_URL="https://$(echo "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["endpoint"])')"
+            REST_TOKEN=$(echo "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rest_token"])')
+          fi
+
+          echo "rest_url=$REST_URL" >> "$GITHUB_OUTPUT"
+          # Mask the token so it doesn't leak in logs
+          echo "::add-mask::$REST_TOKEN"
+          echo "rest_token=$REST_TOKEN" >> "$GITHUB_OUTPUT"
+
+      # -- Python setup for smoke tests --
+      - name: Install uv
+        if: github.event.action != 'closed'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.12
+        if: github.event.action != 'closed'
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        if: github.event.action != 'closed'
+        run: uv sync --all-packages
+
+      # -- Smoke tests against the live preview database --
+      - name: Run smoke tests
+        if: github.event.action != 'closed'
+        id: smoke
+        continue-on-error: true
+        env:
+          UPSTASH_REDIS_REST_URL: ${{ steps.create.outputs.rest_url }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ steps.create.outputs.rest_token }}
+        run: |
+          uv run --package unlock-workers pytest packages/config-access/tests/test_live_smoke.py -v --tb=short 2>&1 | tee /tmp/smoke-results.txt
+          TESTS_PASSED=$(grep -c "PASSED" /tmp/smoke-results.txt 2>/dev/null) || TESTS_PASSED=0
+          TESTS_FAILED=$(grep -c "FAILED" /tmp/smoke-results.txt 2>/dev/null) || TESTS_FAILED=0
+          echo "passed=$TESTS_PASSED" >> "$GITHUB_OUTPUT"
+          echo "failed=$TESTS_FAILED" >> "$GITHUB_OUTPUT"
+
+      # -- PR comment (posted regardless of test outcome) --
+      - name: Post or update PR comment
+        if: github.event.action != 'closed'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: upstash-preview
+          message: |
+            <img src="https://upstash.com/icons/favicon-32x32.png" alt="Upstash" width="20" height="20" align="absmiddle" /> **Upstash Preview Database**
+
+            | | |
+            |---|---|
+            | **Database** | `${{ env.DB_NAME }}` |
+            | **Status** | Active |
+            | **Endpoint** | `${{ steps.create.outputs.rest_url }}` |
+            | **Smoke Tests** | ${{ steps.smoke.outcome == 'success' && '&#9989;' || '&#10060;' }} ${{ steps.smoke.outputs.passed }} passed, ${{ steps.smoke.outputs.failed }} failed |
+
+            Config Access activities in this PR use an isolated Redis database.
+            It is **reused across commits** and **destroyed** when this PR is closed or merged.
+
+      # -- Fail the check if smoke tests failed --
+      - name: Require smoke tests pass
+        if: github.event.action != 'closed' && steps.smoke.outcome == 'failure'
+        run: |
+          echo "Smoke tests failed against live Upstash — see test output above."
+          exit 1
+
+      # -- Destroy database on close/merge --
+      - name: Destroy preview database
+        if: github.event.action == 'closed'
+        env:
+          UPSTASH_EMAIL: ${{ secrets.UPSTASH_EMAIL }}
+          UPSTASH_API_KEY: ${{ secrets.UPSTASH_API_KEY }}
+        run: |
+          DB_ID=$(curl -s -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
+            https://api.upstash.com/v2/redis/databases | \
+            python3 -c "
+          import json, sys
+          dbs = json.load(sys.stdin)
+          for db in dbs:
+              if db.get('database_name') == '${{ env.DB_NAME }}':
+                  print(db['database_id'])
+                  break
+          " 2>/dev/null || echo "")
+
+          if [ -n "$DB_ID" ]; then
+            echo "Destroying database ${{ env.DB_NAME }} (id: $DB_ID)..."
+            curl -s -X DELETE \
+              -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
+              "https://api.upstash.com/v2/redis/database/$DB_ID"
+            echo "Destroyed."
+          else
+            echo "Database ${{ env.DB_NAME }} not found (may have been deleted already)."
+          fi
+
+      - name: Update PR comment (destroyed)
+        if: github.event.action == 'closed'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: upstash-preview
+          message: |
+            <img src="https://upstash.com/icons/favicon-32x32.png" alt="Upstash" width="20" height="20" align="absmiddle" /> **Upstash Preview Database**
+
+            | | |
+            |---|---|
+            | **Database** | `${{ env.DB_NAME }}` |
+            | **Status** | Destroyed |
