@@ -9,6 +9,10 @@ concurrency:
   group: deploy
   cancel-in-progress: true
 
+permissions:
+  contents: write
+  issues: write
+
 jobs:
   gate:
     name: Gate — run CI first
@@ -35,6 +39,21 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
 
+      # Upstash Redis — verify production database is reachable
+      - name: Verify Upstash connection
+        env:
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+        run: |
+          RESPONSE=$(curl -s "$UPSTASH_REDIS_REST_URL/PING" \
+            -H "Authorization: Bearer $UPSTASH_REDIS_REST_TOKEN")
+          if echo "$RESPONSE" | grep -qi "PONG"; then
+            echo "Upstash production database is healthy"
+          else
+            echo "ERROR: Upstash health check failed: $RESPONSE"
+            exit 1
+          fi
+
       # Railway and Vercel auto-deploy from main via their GitHub integrations.
       # No explicit deploy step needed here — just ensure CI passes first.
       - name: Deploy marker
@@ -47,3 +66,78 @@ jobs:
     with:
       environment: production
     secrets: inherit
+
+  # ========================================================================
+  # Auto-revert: if gate or deploy fails, revert the merge commit on main
+  # so production never runs broken code.
+  #
+  # Railway and Vercel auto-deploy from main — a broken merge means broken
+  # production. The revert pushes a fix commit that triggers re-deploy of
+  # the last known-good state.
+  #
+  # Skips if the commit is itself a revert (prevents infinite loops).
+  # ========================================================================
+  revert-on-failure:
+    name: Auto-revert on failure
+    needs: [gate, deploy]
+    if: >-
+      always() &&
+      (needs.gate.result == 'failure' || needs.deploy.result == 'failure') &&
+      !startsWith(github.event.head_commit.message, 'Revert')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Revert merge commit
+        run: |
+          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          echo "Reverting $COMMIT_SHA: $COMMIT_MSG"
+
+          # -m 1 keeps the first parent (main before the merge)
+          git revert --no-edit -m 1 HEAD
+          git push origin main
+
+      - name: Create incident issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_RESULT: ${{ needs.gate.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          FAILED_JOBS=""
+          [ "$GATE_RESULT" = "failure" ] && FAILED_JOBS="CI (gate) "
+          [ "$DEPLOY_RESULT" = "failure" ] && FAILED_JOBS="${FAILED_JOBS}Deploy"
+
+          gh issue create \
+            --title "Auto-reverted: ${COMMIT_MSG}" \
+            --label "incident" \
+            --body "$(cat <<EOF
+          ## Auto-Revert Triggered
+
+          | | |
+          |---|---|
+          | **Reverted commit** | ${COMMIT_SHA} |
+          | **Failed jobs** | ${FAILED_JOBS} |
+          | **Run** | [View logs](${RUN_URL}) |
+
+          The merge was automatically reverted because deploy checks failed.
+          Main and production are back in sync with the last known-good state.
+
+          ### Next steps
+          1. Check the [failed run](${RUN_URL}) for details
+          2. Fix the issue on a feature branch
+          3. Re-merge through staging → main
+
+          _This issue was created automatically by the deploy safety system._
+          EOF
+          )"

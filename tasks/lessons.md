@@ -477,3 +477,22 @@ doesn't necessarily make all workspace member packages importable. The CI workfl
 
 **Fix:** Use `uv sync --all-packages` for the install step and
 `uv run --package unlock-workers pytest ...` for the test step, matching the CI pattern.
+
+## 2026-02-20: Auto-revert on deploy failure — main must equal production
+
+**Problem:** After merging to main, Railway and Vercel auto-deploy. If CI or deploy steps fail,
+production diverges from main — broken code is live until someone manually reverts.
+
+**Fix:** Added `revert-on-failure` job to `deploy.yml` that:
+1. Runs `if: always()` so it executes even when upstream jobs fail
+2. Checks `needs.gate.result == 'failure' || needs.deploy.result == 'failure'`
+3. Guards against infinite loops: `!startsWith(github.event.head_commit.message, 'Revert')`
+4. Uses `git revert --no-edit -m 1 HEAD` to revert the merge commit (keeps main's first parent)
+5. Creates an incident issue with "incident" label for tracking
+
+**Also added:** Upstash PING health check in the deploy job — verifies production Redis is
+reachable before marking deploy as successful. This is the Redis equivalent of `supabase db push`.
+
+**Rule:** Any auto-deploying platform (Railway, Vercel) connected to main needs an auto-revert
+mechanism. The revert push triggers re-deploy of the last known-good state. Always include
+loop prevention (skip if commit message starts with "Revert").
