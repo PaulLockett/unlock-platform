@@ -15,6 +15,7 @@ dependencies = [
     "unlock-config-access",
     "unlock-llm-gateway",
     "unlock-scheduler",
+    "unlock-auth",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ unlock-data-access = { workspace = true }
 unlock-config-access = { workspace = true }
 unlock-llm-gateway = { workspace = true }
 unlock-scheduler = { workspace = true }
+unlock-auth = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

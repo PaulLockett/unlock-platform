@@ -1035,6 +1035,7 @@ source = { editable = "workers" }
 dependencies = [
     { name = "temporalio" },
     { name = "unlock-access-engine" },
+    { name = "unlock-auth" },
     { name = "unlock-config-access" },
     { name = "unlock-data-access" },
     { name = "unlock-data-manager" },
@@ -1062,6 +1063,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.0" },
     { name = "temporalio", specifier = ">=1.9.0" },
     { name = "unlock-access-engine", editable = "packages/access-engine" },
+    { name = "unlock-auth", editable = "packages/auth" },
     { name = "unlock-config-access", editable = "packages/config-access" },
     { name = "unlock-data-access", editable = "packages/data-access" },
     { name = "unlock-data-manager", editable = "packages/data-manager" },
