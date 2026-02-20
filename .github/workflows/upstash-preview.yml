@@ -42,8 +42,20 @@ jobs:
             RESPONSE=$(curl -s -X POST \
               -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
               -H "Content-Type: application/json" \
-              -d '{"name": "${{ env.DB_NAME }}", "region": "us-east-1", "tls": true}' \
+              -d '{"name": "${{ env.DB_NAME }}", "region": "global", "primary_region": "us-east-1", "read_regions": [], "tls": true}' \
               https://api.upstash.com/v2/redis/database)
+
+            # Validate response before parsing
+            echo "$RESPONSE" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          if isinstance(data, str):
+              print(f'API error: {data}', file=sys.stderr)
+              sys.exit(1)
+          if 'error' in data:
+              print(f'API error: {data[\"error\"]}', file=sys.stderr)
+              sys.exit(1)
+          " || exit 1
 
             REST_URL="https://$(echo "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["endpoint"])')"
             REST_TOKEN=$(echo "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rest_token"])')

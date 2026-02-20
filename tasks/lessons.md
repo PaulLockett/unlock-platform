@@ -431,3 +431,20 @@ cloud (staging/production/PR preview). RedisAdapter normalizes the interface dif
 
 **Rule:** ResourceAccess components expose domain verbs, use JSON documents in Redis. Key patterns
 should be readable as domain relationships (`cfg:view:idx:schema:{id}` = "views using this schema").
+
+## 2026-02-20: Upstash deprecated regional database creation
+
+**Problem:** `POST /v2/redis/database` with `"region": "us-east-1"` returns the JSON string
+`"regional db creation is deprecated"`. This is a bare JSON string (not a dict), so
+`json.load(sys.stdin)["endpoint"]` gives `TypeError: string indices must be integers`.
+
+**Root cause:** Upstash deprecated regional databases. All new databases must be "global" with
+a `primary_region` field.
+
+**Fix:** Use `"region": "global", "primary_region": "us-east-1", "read_regions": []` in the
+POST payload. For ephemeral PR preview databases, empty `read_regions` is fine — no need to
+replicate across continents for a short-lived test database.
+
+**Rule:** Always validate API responses before accessing fields. Add a guard that checks
+`isinstance(data, str)` and `"error" in data` before parsing specific keys. API errors should
+fail loudly with the actual error message, not with a confusing Python traceback.

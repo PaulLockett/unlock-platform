@@ -10,8 +10,8 @@ Uses the Upstash Developer API (api.upstash.com/v2) with Basic auth
 creation — any developer (or CI) can run this script.
 
 Usage:
-  python scripts/manage_upstash.py create --name unlock-config-staging --region us-east-1
-  python scripts/manage_upstash.py create --name unlock-config-production --region us-east-1
+  python scripts/manage_upstash.py create --name unlock-config-staging
+  python scripts/manage_upstash.py create --name unlock-config-production
   python scripts/manage_upstash.py list
   python scripts/manage_upstash.py delete --name unlock-config-pr-42
 """
@@ -83,10 +83,15 @@ def cmd_create(args: argparse.Namespace) -> None:
 
     data = _request("POST", "/database", {
         "name": args.name,
-        "region": args.region,
+        "region": "global",
+        "primary_region": args.primary_region,
+        "read_regions": [],
         "tls": True,
     })
 
+    if isinstance(data, str):
+        print(f"ERROR: {data}", file=sys.stderr)
+        sys.exit(1)
     if "error" in data:
         print(f"ERROR: {data['error']}", file=sys.stderr)
         sys.exit(1)
@@ -150,7 +155,10 @@ def main() -> None:
     # create
     create_p = subparsers.add_parser("create", help="Create a database")
     create_p.add_argument("--name", required=True, help="Database name")
-    create_p.add_argument("--region", default="us-east-1", help="Region (default: us-east-1)")
+    create_p.add_argument(
+        "--primary-region", default="us-east-1",
+        help="Primary region for global database (default: us-east-1)",
+    )
 
     # list
     subparsers.add_parser("list", help="List all databases")
