@@ -496,3 +496,37 @@ reachable before marking deploy as successful. This is the Redis equivalent of `
 **Rule:** Any auto-deploying platform (Railway, Vercel) connected to main needs an auto-revert
 mechanism. The revert push triggers re-deploy of the last known-good state. Always include
 loop prevention (skip if commit message starts with "Revert").
+
+## 2026-02-20: Temporal Schedule API mock fidelity — match real SDK structure
+
+**Problem:** Mock tests for `describe_harvest` and `list_harvests` passed initially but had wrong
+mock structure. `MockScheduleActionResult` used `start_workflow_result` (invented field) instead of
+the real `action` field (of type `ScheduleActionExecutionStartWorkflow` with `workflow_id`).
+`MockScheduleListEntry` had no `schedule` attribute, but the real `ScheduleListDescription` has
+`schedule: ScheduleListSchedule | None` with nested `state` and `spec` objects.
+
+**Root cause:** Built mocks from the plan's description rather than introspecting the actual SDK
+dataclass fields. The Temporal Python SDK uses deeply nested dataclasses — the only reliable way
+to mock them is to `inspect.signature()` or `dataclasses.fields()` each type first.
+
+**Fix:** Added `action` field to MockScheduleActionResult, `schedule` field with `state` and `spec`
+to MockScheduleListEntry. Used `hasattr(action_result.action, "workflow_id")` in the activity
+instead of `isinstance()` to avoid importing the execution type (cleaner for mocking).
+
+**Rule:** When mocking deeply nested SDK types (Temporal, boto3, etc.), always introspect the actual
+dataclass/type structure first with `dataclasses.fields()`. Don't rely on documentation or plan
+descriptions — they may describe the conceptual model, not the actual field names.
+
+## 2026-02-20: ScheduleListDescription.memo() is a method, not a dict
+
+**Problem:** `list_harvests` activity accessed `entry.memo` as a dict attribute, but
+`ScheduleListDescription.memo()` is a method returning `Mapping[str, Any]` that decodes memo
+payloads from the Temporal server.
+
+**Fix:** Changed activity to call `entry.memo()` as a method, wrapped in try/except since memo
+decoding can fail if payloads are missing. Updated mock to use a `memo()` method matching the
+real interface.
+
+**Rule:** Always verify whether Temporal client class attributes are properties, methods, or plain
+fields. Use `type(getattr(Class, 'attr'))` to distinguish. Temporal frequently uses methods for
+payload decoding that look like they should be properties.

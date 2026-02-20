@@ -47,6 +47,14 @@ from unlock_data_manager.workflows.ingest import IngestWorkflow
 from unlock_data_manager.workflows.query import QueryWorkflow
 from unlock_data_manager.workflows.share import ShareWorkflow
 from unlock_llm_gateway.activities import hello_llm_assess
+from unlock_scheduler.activities import (
+    cancel_harvest,
+    describe_harvest,
+    list_harvests,
+    pause_harvest,
+    register_harvest,
+    resume_harvest,
+)
 from unlock_schema_engine.activities import hello_validate_schema
 from unlock_shared.task_queues import (
     ACCESS_ENGINE_QUEUE,
@@ -135,5 +143,13 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "scheduler": ComponentConfig(
         task_queue=SCHEDULER_QUEUE,
+        activities=[
+            register_harvest,
+            pause_harvest,
+            resume_harvest,
+            cancel_harvest,
+            describe_harvest,
+            list_harvests,
+        ],
     ),
 }
