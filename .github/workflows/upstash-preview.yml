@@ -80,7 +80,7 @@ jobs:
 
       - name: Install dependencies
         if: github.event.action != 'closed'
-        run: uv sync
+        run: uv sync --all-packages
 
       # -- Smoke tests against the live preview database --
       - name: Run smoke tests
@@ -91,9 +91,9 @@ jobs:
           UPSTASH_REDIS_REST_URL: ${{ steps.create.outputs.rest_url }}
           UPSTASH_REDIS_REST_TOKEN: ${{ steps.create.outputs.rest_token }}
         run: |
-          uv run pytest packages/config-access/tests/test_live_smoke.py -v --tb=short 2>&1 | tee /tmp/smoke-results.txt
-          TESTS_PASSED=$(grep -c "PASSED" /tmp/smoke-results.txt || echo "0")
-          TESTS_FAILED=$(grep -c "FAILED" /tmp/smoke-results.txt || echo "0")
+          uv run --package unlock-workers pytest packages/config-access/tests/test_live_smoke.py -v --tb=short 2>&1 | tee /tmp/smoke-results.txt
+          TESTS_PASSED=$(grep -c "PASSED" /tmp/smoke-results.txt 2>/dev/null) || TESTS_PASSED=0
+          TESTS_FAILED=$(grep -c "FAILED" /tmp/smoke-results.txt 2>/dev/null) || TESTS_FAILED=0
           echo "passed=$TESTS_PASSED" >> "$GITHUB_OUTPUT"
           echo "failed=$TESTS_FAILED" >> "$GITHUB_OUTPUT"
 
