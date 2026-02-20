@@ -181,7 +181,9 @@ async def describe_harvest(req: DescribeHarvestRequest) -> DescribeHarvestResult
 
     Extracts from ScheduleDescription:
       - is_paused: from schedule.state.paused
-      - cron_expression: from schedule.spec.cron_expressions[0]
+      - cron_expression: from spec.cron_expressions[0] OR calendars[0].comment
+        (Temporal Cloud normalizes cron strings into ScheduleCalendarSpec objects
+        and stores the original cron in the comment field)
       - next_run_time: from info.next_action_times[0] (ISO format)
       - recent_runs: from info.recent_actions (workflow_id + started_at)
     """
@@ -192,10 +194,16 @@ async def describe_harvest(req: DescribeHarvestRequest) -> DescribeHarvestResult
         handle = client.get_schedule_handle(sid)
         desc = await handle.describe()
 
-        # Extract cron expression
+        # Extract cron expression. Temporal Cloud normalizes cron strings into
+        # structured ScheduleCalendarSpec objects, so cron_expressions comes back
+        # empty on describe. The original cron is preserved in calendars[0].comment.
         cron = ""
         if desc.schedule.spec.cron_expressions:
             cron = desc.schedule.spec.cron_expressions[0]
+        elif desc.schedule.spec.calendars:
+            comment = desc.schedule.spec.calendars[0].comment
+            if comment:
+                cron = comment
 
         # Extract next run time
         next_run = ""

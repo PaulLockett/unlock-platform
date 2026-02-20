@@ -72,7 +72,12 @@ class TestLiveScheduleLifecycle:
             assert desc.success, f"describe_harvest failed: {desc.message}"
             assert desc.schedule_id == schedule_id
             assert desc.is_paused is False
-            assert desc.cron_expression == "0 0 1 1 *"
+            # Temporal Cloud normalizes cron into ScheduleCalendarSpec; the
+            # original cron is preserved in calendars[0].comment. Our activity
+            # extracts it from there, so it should match the original.
+            assert desc.cron_expression == "0 0 1 1 *", (
+                f"Expected cron '0 0 1 1 *', got '{desc.cron_expression}'"
+            )
             assert desc.next_run_time != ""
 
             # 3. Pause
