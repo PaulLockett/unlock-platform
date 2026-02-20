@@ -102,6 +102,13 @@ async def register_harvest(req: RegisterHarvestRequest) -> RegisterHarvestResult
             schedule_id=sid,
         )
     except Exception as e:
+        # Temporal Cloud may wrap "already exists" in non-RPCError exceptions
+        if "already" in str(e).lower():
+            return RegisterHarvestResult(
+                success=True,
+                message=f"Schedule {sid} already exists (idempotent)",
+                schedule_id=sid,
+            )
         return RegisterHarvestResult(
             success=False,
             message=f"Failed to create schedule {sid}: {e}",
@@ -257,9 +264,9 @@ async def list_harvests(req: ListHarvestsRequest) -> ListHarvestsResult:
             }
 
             # Extract source_name from memo if available.
-            # ScheduleListDescription.memo() is a method returning Mapping[str, Any].
+            # ScheduleListDescription.memo() is async, returning Mapping[str, Any].
             try:
-                memo = entry.memo()
+                memo = await entry.memo()
                 source = memo.get("source_name", "")
                 if source:
                     info["source_name"] = source
