@@ -496,3 +496,102 @@ reachable before marking deploy as successful. This is the Redis equivalent of `
 **Rule:** Any auto-deploying platform (Railway, Vercel) connected to main needs an auto-revert
 mechanism. The revert push triggers re-deploy of the last known-good state. Always include
 loop prevention (skip if commit message starts with "Revert").
+
+## 2026-02-20: Temporal Schedule API mock fidelity — match real SDK structure
+
+**Problem:** Mock tests for `describe_harvest` and `list_harvests` passed initially but had wrong
+mock structure. `MockScheduleActionResult` used `start_workflow_result` (invented field) instead of
+the real `action` field (of type `ScheduleActionExecutionStartWorkflow` with `workflow_id`).
+`MockScheduleListEntry` had no `schedule` attribute, but the real `ScheduleListDescription` has
+`schedule: ScheduleListSchedule | None` with nested `state` and `spec` objects.
+
+**Root cause:** Built mocks from the plan's description rather than introspecting the actual SDK
+dataclass fields. The Temporal Python SDK uses deeply nested dataclasses — the only reliable way
+to mock them is to `inspect.signature()` or `dataclasses.fields()` each type first.
+
+**Fix:** Added `action` field to MockScheduleActionResult, `schedule` field with `state` and `spec`
+to MockScheduleListEntry. Used `hasattr(action_result.action, "workflow_id")` in the activity
+instead of `isinstance()` to avoid importing the execution type (cleaner for mocking).
+
+**Rule:** When mocking deeply nested SDK types (Temporal, boto3, etc.), always introspect the actual
+dataclass/type structure first with `dataclasses.fields()`. Don't rely on documentation or plan
+descriptions — they may describe the conceptual model, not the actual field names.
+
+## 2026-02-20: ScheduleListDescription.memo() is a method, not a dict
+
+**Problem:** `list_harvests` activity accessed `entry.memo` as a dict attribute, but
+`ScheduleListDescription.memo()` is a method returning `Mapping[str, Any]` that decodes memo
+payloads from the Temporal server.
+
+**Fix:** Changed activity to call `entry.memo()` as a method, wrapped in try/except since memo
+decoding can fail if payloads are missing. Updated mock to use a `memo()` method matching the
+real interface.
+
+**Rule:** Always verify whether Temporal client class attributes are properties, methods, or plain
+fields. Use `type(getattr(Class, 'attr'))` to distinguish. Temporal frequently uses methods for
+payload decoding that look like they should be properties.
+
+## 2026-02-20: Temporal Cloud normalizes cron_expressions into ScheduleCalendarSpec
+
+**Problem:** Live smoke test asserted `desc.cron_expression == "0 0 1 1 *"` but got `""`.
+After creating a schedule with `cron_expressions=["0 0 1 1 *"]`, `describe()` returns an
+empty `cron_expressions` list. The cron string is server-side normalized into structured
+`ScheduleCalendarSpec` objects (`calendars` list with `second`, `minute`, `hour`, etc. ranges).
+
+**Fix:** Removed strict cron assertion from live test. Verify schedule correctness via
+`next_run_time` (which IS populated) rather than expecting the original cron string back.
+Added fallback in `describe_harvest` to check `calendars[0].comment` where Temporal
+*sometimes* preserves the original cron, but don't rely on it.
+
+**Rule:** Never assert raw cron strings round-trip through Temporal Cloud. The server normalizes
+them into calendar specs. Test schedule behavior (next_run_time, is_paused) not representation.
+
+## 2026-02-20: Temporal list_schedules() has eventual consistency
+
+**Problem:** Live smoke test created a schedule then immediately called `list_harvests()`.
+The schedule wasn't in the list — `"Schedule harvest-smoke-test-xxx not found in list"`.
+
+**Root cause:** Temporal's visibility store (used by `list_schedules()`) has eventual consistency.
+A newly created schedule may not appear in list results immediately.
+
+**Fix:** Added retry loop: up to 5 attempts with 1-second delays between each.
+
+**Rule:** Any test that creates a Temporal resource then queries a list/search endpoint must
+account for eventual consistency. Use retry loops with short delays, not single-shot assertions.
+
+## 2026-02-20: ScheduleListDescription.memo() is async, not sync
+
+**Problem:** `list_harvests` called `entry.memo()` synchronously, but the real
+`ScheduleListDescription.memo()` is a coroutine. CI produced `RuntimeWarning: coroutine
+'ScheduleListDescription.memo' was never awaited` and the memo data was never extracted.
+
+**Fix:** Changed to `await entry.memo()` in the activity, and made the mock's `memo()` method
+async to match.
+
+**Rule:** When the Temporal SDK method returns payload data that needs decoding, assume it's
+async. The SDK uses async methods for anything that may involve deserialization from protobuf.
+
+## 2026-02-20: Temporal "Schedule already running" may bypass RPCError handler
+
+**Problem:** Idempotent re-register test failed: `register_harvest` caught `RPCError` with
+`RPCStatusCode.ALREADY_EXISTS` check, but the actual error ("Schedule already running") went
+through the generic `Exception` handler instead, returning `success=False`.
+
+**Fix:** Added fallback in the generic `Exception` handler: if `"already" in str(e).lower()`,
+treat it as idempotent success.
+
+**Rule:** Temporal Cloud error handling isn't always predictable at the SDK exception-type level.
+For idempotent operations, add message-based fallback detection in addition to status code checks.
+
+## 2026-02-20: grep -c double-counts in pytest verbose output
+
+**Problem:** Temporal Bot workflow used `grep -c "FAILED"` to count failed tests, but in verbose
+mode (`-v`), pytest outputs both `test_name FAILED [100%]` and `FAILED tests/...::test_name`,
+causing `grep -c` to report 2 failures for 1 actual failure.
+
+**Fix:** Parse from pytest's summary line (last line, e.g., `= 1 passed in 2.63s =`) using
+`tail -1 | grep -oP '\d+ passed'` instead of `grep -c "PASSED"` on the full output.
+
+**Rule:** When parsing pytest results in CI, always use the summary line — it's the only
+reliable single-source count. Verbose output lines contain status keywords in both the per-test
+line and the summary, making `grep -c` unreliable.
