@@ -17,7 +17,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from unlock_access_engine.activities import hello_check_access
-from unlock_config_access.activities import hello_load_config
+from unlock_config_access.activities import (
+    activate_view,
+    archive_schema,
+    clone_view,
+    define_pipeline,
+    grant_access,
+    hello_load_config,
+    publish_schema,
+    retrieve_view,
+    revoke_access,
+    survey_configs,
+)
 from unlock_data_access.activities import (
     catalog_content,
     close_pipeline_run,
@@ -97,7 +108,18 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "config-access": ComponentConfig(
         task_queue=CONFIG_ACCESS_QUEUE,
-        activities=[hello_load_config],
+        activities=[
+            hello_load_config,
+            publish_schema,
+            define_pipeline,
+            activate_view,
+            retrieve_view,
+            grant_access,
+            revoke_access,
+            clone_view,
+            archive_schema,
+            survey_configs,
+        ],
     ),
     "schema-engine": ComponentConfig(
         task_queue=SCHEMA_ENGINE_QUEUE,

@@ -48,6 +48,9 @@ jobs:
           RB2B_API_KEY: ${{ secrets.RB2B_API_KEY }}
           # Data Access
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # Config Access
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
           # LLM Gateway
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           # Temporal (shared)
