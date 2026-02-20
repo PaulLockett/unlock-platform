@@ -448,3 +448,32 @@ replicate across continents for a short-lived test database.
 **Rule:** Always validate API responses before accessing fields. Add a guard that checks
 `isinstance(data, str)` and `"error" in data` before parsing specific keys. API errors should
 fail loudly with the actual error message, not with a confusing Python traceback.
+
+## 2026-02-20: Upstash zadd format — don't use {"member": x, "score": y} with SDK
+
+**Problem:** Live smoke tests against Upstash failed with `ERR value is not a valid float`.
+All 6 tests failed on `publish_schema` because `zadd` couldn't write to sorted set indexes.
+
+**Root cause:** The RedisAdapter had Upstash-specific `zadd` handling that passed
+`{"member": uuid, "score": float}` — the Upstash SDK interpreted "member" and "score" as
+literal member names in a `{member: score}` dict, so it tried to use the UUID string as a
+score (not a valid float).
+
+**Fix:** Both Upstash SDK and redis-py accept `{member_string: score_float}` format directly.
+Removed the Upstash-specific handling entirely: `await self._client.zadd(key, mapping)`.
+
+**Rule:** Live smoke tests against real infrastructure are essential for adapters that wrap
+different SDKs. Mock tests can't catch format differences between SDKs — only real API calls
+reveal these bugs. The CFG_ACC smoke tests caught this on the first run.
+
+## 2026-02-20: uv workspace — `uv sync` alone doesn't resolve all packages
+
+**Problem:** `uv run pytest` in GitHub Actions failed with `ModuleNotFoundError: No module
+named 'unlock_config_access'` even after `uv sync`.
+
+**Root cause:** In a uv workspace, `uv sync` installs the root project's dependencies but
+doesn't necessarily make all workspace member packages importable. The CI workflow uses
+`uv run --package unlock-workers` which ensures the full dependency tree is resolved.
+
+**Fix:** Use `uv sync --all-packages` for the install step and
+`uv run --package unlock-workers pytest ...` for the test step, matching the CI pattern.
