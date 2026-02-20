@@ -530,3 +530,68 @@ real interface.
 **Rule:** Always verify whether Temporal client class attributes are properties, methods, or plain
 fields. Use `type(getattr(Class, 'attr'))` to distinguish. Temporal frequently uses methods for
 payload decoding that look like they should be properties.
+
+## 2026-02-20: Temporal Cloud normalizes cron_expressions into ScheduleCalendarSpec
+
+**Problem:** Live smoke test asserted `desc.cron_expression == "0 0 1 1 *"` but got `""`.
+After creating a schedule with `cron_expressions=["0 0 1 1 *"]`, `describe()` returns an
+empty `cron_expressions` list. The cron string is server-side normalized into structured
+`ScheduleCalendarSpec` objects (`calendars` list with `second`, `minute`, `hour`, etc. ranges).
+
+**Fix:** Removed strict cron assertion from live test. Verify schedule correctness via
+`next_run_time` (which IS populated) rather than expecting the original cron string back.
+Added fallback in `describe_harvest` to check `calendars[0].comment` where Temporal
+*sometimes* preserves the original cron, but don't rely on it.
+
+**Rule:** Never assert raw cron strings round-trip through Temporal Cloud. The server normalizes
+them into calendar specs. Test schedule behavior (next_run_time, is_paused) not representation.
+
+## 2026-02-20: Temporal list_schedules() has eventual consistency
+
+**Problem:** Live smoke test created a schedule then immediately called `list_harvests()`.
+The schedule wasn't in the list — `"Schedule harvest-smoke-test-xxx not found in list"`.
+
+**Root cause:** Temporal's visibility store (used by `list_schedules()`) has eventual consistency.
+A newly created schedule may not appear in list results immediately.
+
+**Fix:** Added retry loop: up to 5 attempts with 1-second delays between each.
+
+**Rule:** Any test that creates a Temporal resource then queries a list/search endpoint must
+account for eventual consistency. Use retry loops with short delays, not single-shot assertions.
+
+## 2026-02-20: ScheduleListDescription.memo() is async, not sync
+
+**Problem:** `list_harvests` called `entry.memo()` synchronously, but the real
+`ScheduleListDescription.memo()` is a coroutine. CI produced `RuntimeWarning: coroutine
+'ScheduleListDescription.memo' was never awaited` and the memo data was never extracted.
+
+**Fix:** Changed to `await entry.memo()` in the activity, and made the mock's `memo()` method
+async to match.
+
+**Rule:** When the Temporal SDK method returns payload data that needs decoding, assume it's
+async. The SDK uses async methods for anything that may involve deserialization from protobuf.
+
+## 2026-02-20: Temporal "Schedule already running" may bypass RPCError handler
+
+**Problem:** Idempotent re-register test failed: `register_harvest` caught `RPCError` with
+`RPCStatusCode.ALREADY_EXISTS` check, but the actual error ("Schedule already running") went
+through the generic `Exception` handler instead, returning `success=False`.
+
+**Fix:** Added fallback in the generic `Exception` handler: if `"already" in str(e).lower()`,
+treat it as idempotent success.
+
+**Rule:** Temporal Cloud error handling isn't always predictable at the SDK exception-type level.
+For idempotent operations, add message-based fallback detection in addition to status code checks.
+
+## 2026-02-20: grep -c double-counts in pytest verbose output
+
+**Problem:** Temporal Bot workflow used `grep -c "FAILED"` to count failed tests, but in verbose
+mode (`-v`), pytest outputs both `test_name FAILED [100%]` and `FAILED tests/...::test_name`,
+causing `grep -c` to report 2 failures for 1 actual failure.
+
+**Fix:** Parse from pytest's summary line (last line, e.g., `= 1 passed in 2.63s =`) using
+`tail -1 | grep -oP '\d+ passed'` instead of `grep -c "PASSED"` on the full output.
+
+**Rule:** When parsing pytest results in CI, always use the summary line — it's the only
+reliable single-source count. Verbose output lines contain status keywords in both the per-test
+line and the summary, making `grep -c` unreliable.
