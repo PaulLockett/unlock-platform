@@ -33,6 +33,7 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["packages", "workers"]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"
 markers = [
     "live: tests that hit real external APIs (cost money, require credentials)",
     "smoke: tier-1 auth-only verification (cheapest possible)",

@@ -82,6 +82,9 @@ VAR_ROUTING: dict[str, list[str]] = {
     "RB2B_API_KEY": ["source-access"],
     # Data Access — Supabase direct connection
     "SUPABASE_DB_URL": ["data-access"],
+    # Config Access — Upstash Redis
+    "UPSTASH_REDIS_REST_URL": ["config-access"],
+    "UPSTASH_REDIS_REST_TOKEN": ["config-access"],
     # LLM Gateway
     "OPENROUTER_API_KEY": ["llm-gateway"],
     # Temporal — shared infrastructure, every worker needs these

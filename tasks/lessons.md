@@ -353,3 +353,81 @@ are irrelevant to the operation (e.g., `major_version` doesn't matter for `db pu
 `supabase link` + `supabase db push`. It's simpler (one secret instead of three), avoids
 config.toml parsing issues, and doesn't require `SUPABASE_ACCESS_TOKEN` or `SUPABASE_DB_PASSWORD`.
 Keep `config.toml` conservative — remove auto-generated keys for features you don't use.
+
+## 2026-02-18: Supabase branching gives free PR-level migration validation
+
+**Setup:** Enable branching in Supabase dashboard (Project Settings → Branching → Enable).
+Connect to GitHub repo. Supabase auto-creates an isolated preview database for every PR,
+runs all migrations from `supabase/migrations/`, seeds data, and reports via a "Supabase Preview"
+GitHub check. Preview branches auto-delete on PR close/merge.
+
+**Important:** Disable "Deploy to production" in branching settings if you handle production
+migrations separately (we do, via `supabase db push --db-url` in `deploy.yml`). Having both
+enabled would run migrations twice on every merge to main.
+
+**No CI changes required.** The GitHub integration handles everything — no workflow steps to
+add, no secrets to configure for preview branches. The "Supabase Preview" check appears
+automatically on PRs.
+
+**Branch protection:** On GitHub Pro (or public repos), add "Supabase Preview" as a required
+status check to prevent merging PRs with broken migrations. On free private repos, the check
+still appears but can't be enforced as a gate.
+
+**Rule:** Supabase branching is the PR-level database validation layer. `deploy.yml` is the
+production deployment layer. Keep them separate — branching validates, deploy.yml applies.
+
+## 2026-02-20: pytest import-mode=importlib required for multi-package monorepos
+
+**Problem:** When running `pytest packages/ workers/` across multiple workspace packages that
+each have `tests/test_activities.py`, `tests/test_models.py`, etc., pytest fails with
+`ImportPathMismatchError` — it treats same-named test files across packages as the same module.
+
+**Root cause:** pytest's default import mode (`prepend`) adds the test file's parent directory
+to `sys.path` and imports by basename. Two files named `test_activities.py` in different
+packages become the same module `test_activities`, causing a collision.
+
+**Fix:** Add `addopts = "--import-mode=importlib"` to `[tool.pytest.ini_options]` in
+`pyproject.toml`. Importlib mode uses unique module names based on full file paths, so
+`packages/config-access/tests/test_activities.py` and `packages/data-access/tests/test_activities.py`
+are imported as distinct modules.
+
+**Rule:** Any monorepo with multiple Python packages that have identically-named test files must
+use `--import-mode=importlib`. This should be the default for all new monorepo setups.
+
+## 2026-02-20: Pydantic field name "schema" shadows BaseModel internals
+
+**Problem:** `RetrieveViewResult(PlatformResult)` had a field named `schema` which triggered
+a Pydantic `UserWarning: Field name "schema" shadows an attribute in parent`. This can cause
+subtle serialization bugs since `BaseModel` uses `schema` internally for JSON Schema generation.
+
+**Fix:** Renamed to `schema_def`. The warning would have become an error in future Pydantic versions.
+
+**Rule:** Never name Pydantic fields `schema`, `model_fields`, `model_config`, or any other
+`BaseModel` attribute/method name. These are reserved by Pydantic's metaclass.
+
+## 2026-02-20: fakeredis zrange(-1) requires Python slice adjustment
+
+**Problem:** MockRedis's `zrange(key, 0, -1)` returned empty list because Python's `list[0:0]`
+is empty. Redis uses -1 to mean "last element" (inclusive), but Python slicing treats -1 differently.
+
+**Fix:** Handle negative stop index: `if stop < 0: stop = len(members) + stop` before slicing.
+
+**Rule:** When building Redis mocks, always handle Redis's negative-index semantics (where -1 means
+last element) explicitly. Python's native slice behavior doesn't match Redis range commands.
+
+## 2026-02-20: Config Access uses business verbs, not CRUD
+
+**Decision:** CFG_ACC exposes 9 business verb activities that pass the Righting Software test:
+"If I switched from Redis to PostgreSQL, would this name still make sense?"
+
+Verbs: `publish_schema`, `define_pipeline`, `activate_view`, `retrieve_view`, `grant_access`,
+`revoke_access`, `clone_view`, `archive_schema`, `survey_configs`.
+
+**Storage:** Upstash Redis with `cfg:` key prefix. JSON strings for objects, sorted sets for
+time-ordered indexes, sets for status/relationship indexes, hashes for permissions.
+
+**Multi-environment:** fakeredis for local dev (zero external dependency), Upstash SDK for
+cloud (staging/production/PR preview). RedisAdapter normalizes the interface difference.
+
+**Rule:** ResourceAccess components expose domain verbs, use JSON documents in Redis. Key patterns
+should be readable as domain relationships (`cfg:view:idx:schema:{id}` = "views using this schema").

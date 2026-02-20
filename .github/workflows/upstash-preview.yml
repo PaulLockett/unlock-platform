@@ -1,0 +1,114 @@
+name: Upstash Preview
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+jobs:
+  manage-preview:
+    name: Manage Upstash preview database
+    runs-on: ubuntu-latest
+    env:
+      DB_NAME: unlock-config-pr-${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # -- Create or reuse database on open/sync --
+      - name: Create preview database
+        if: github.event.action != 'closed'
+        id: create
+        env:
+          UPSTASH_EMAIL: ${{ secrets.UPSTASH_EMAIL }}
+          UPSTASH_API_KEY: ${{ secrets.UPSTASH_API_KEY }}
+        run: |
+          # Check if database already exists
+          EXISTING=$(curl -s -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
+            https://api.upstash.com/v2/redis/databases | \
+            python3 -c "
+          import json, sys
+          dbs = json.load(sys.stdin)
+          for db in dbs:
+              if db.get('database_name') == '${{ env.DB_NAME }}':
+                  print(json.dumps(db))
+                  break
+          " 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "Database ${{ env.DB_NAME }} already exists"
+            REST_URL="https://$(echo "$EXISTING" | python3 -c 'import json,sys; print(json.load(sys.stdin)["endpoint"])')"
+            REST_TOKEN=$(echo "$EXISTING" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rest_token"])')
+          else
+            echo "Creating database ${{ env.DB_NAME }}..."
+            RESPONSE=$(curl -s -X POST \
+              -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"name": "${{ env.DB_NAME }}", "region": "us-east-1", "tls": true}' \
+              https://api.upstash.com/v2/redis/database)
+
+            REST_URL="https://$(echo "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["endpoint"])')"
+            REST_TOKEN=$(echo "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rest_token"])')
+          fi
+
+          echo "rest_url=$REST_URL" >> "$GITHUB_OUTPUT"
+          # Mask the token so it doesn't leak in logs
+          echo "::add-mask::$REST_TOKEN"
+          echo "rest_token=$REST_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Post or update PR comment
+        if: github.event.action != 'closed'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: upstash-preview
+          message: |
+            ### Upstash Preview Database
+
+            | Key | Value |
+            |-----|-------|
+            | **Database** | `${{ env.DB_NAME }}` |
+            | **Status** | Active |
+            | **REST URL** | `${{ steps.create.outputs.rest_url }}` |
+
+            Config Access activities in this PR use an isolated Redis database.
+            The database will be destroyed when this PR is closed or merged.
+
+      # -- Destroy database on close/merge --
+      - name: Destroy preview database
+        if: github.event.action == 'closed'
+        env:
+          UPSTASH_EMAIL: ${{ secrets.UPSTASH_EMAIL }}
+          UPSTASH_API_KEY: ${{ secrets.UPSTASH_API_KEY }}
+        run: |
+          # Find database ID by name
+          DB_ID=$(curl -s -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
+            https://api.upstash.com/v2/redis/databases | \
+            python3 -c "
+          import json, sys
+          dbs = json.load(sys.stdin)
+          for db in dbs:
+              if db.get('database_name') == '${{ env.DB_NAME }}':
+                  print(db['database_id'])
+                  break
+          " 2>/dev/null || echo "")
+
+          if [ -n "$DB_ID" ]; then
+            echo "Destroying database ${{ env.DB_NAME }} (id: $DB_ID)..."
+            curl -s -X DELETE \
+              -u "$UPSTASH_EMAIL:$UPSTASH_API_KEY" \
+              "https://api.upstash.com/v2/redis/database/$DB_ID"
+            echo "Destroyed."
+          else
+            echo "Database ${{ env.DB_NAME }} not found (may have been deleted already)."
+          fi
+
+      - name: Update PR comment (destroyed)
+        if: github.event.action == 'closed'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: upstash-preview
+          message: |
+            ### Upstash Preview Database
+
+            | Key | Value |
+            |-----|-------|
+            | **Database** | `${{ env.DB_NAME }}` |
+            | **Status** | Destroyed |
