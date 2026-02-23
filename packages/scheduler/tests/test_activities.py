@@ -167,7 +167,7 @@ class MockScheduleListEntry:
             spec=MockScheduleSpec(cron=cron) if cron else MockScheduleSpec(cron=""),
         )
 
-    def memo(self) -> dict[str, str]:
+    async def memo(self) -> dict[str, str]:
         return self._memo
 
 
