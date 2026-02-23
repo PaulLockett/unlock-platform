@@ -5,6 +5,8 @@ description = "Auth Service: Supabase Auth wrapper"
 requires-python = ">=3.12"
 dependencies = [
     "unlock-shared",
+    "PyJWT>=2.8.0",
+    "cryptography>=42.0.0",
 ]
 
 [tool.uv.sources]
