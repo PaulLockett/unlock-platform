@@ -1,0 +1,141 @@
+name: Auth Bot
+
+# Triggered by Vercel deployment status — runs after a preview deployment
+# is live and accessible. The deployment_status event provides the URL
+# directly, so no polling or guessing needed.
+on:
+  deployment_status:
+
+permissions:
+  pull-requests: write
+
+jobs:
+  auth-e2e:
+    name: Auth — E2E magic link
+    # Only run when a preview deployment succeeds
+    if: |
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'Preview'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # -- Python + dependencies --
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install httpx playwright
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium
+
+      # -- Resolve PR number from deployment ref --
+      # deployment_status events don't carry the PR number directly.
+      # We look it up from the deployment ref (the branch name).
+      - name: Find PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.deployment.sha }}"
+          echo "Deployment SHA: $SHA"
+
+          # Vercel uses the commit SHA as deployment ref, not the branch name.
+          # Search for an open PR whose HEAD matches this SHA.
+          PR_NUMBER=$(gh pr list --state open \
+            --json number,headRefOid \
+            --jq ".[] | select(.headRefOid == \"$SHA\") | .number" \
+            2>/dev/null | head -1 || echo "")
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No open PR found for SHA $SHA — skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "PR #$PR_NUMBER"
+            echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -- Run E2E test --
+      - name: Run auth E2E test
+        if: steps.pr.outputs.skip != 'true'
+        id: test
+        continue-on-error: true
+        env:
+          VERCEL_PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
+          BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+          BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VERCEL_PROTECTION_BYPASS_TOKEN: ${{ secrets.VERCEL_PROTECTION_BYPASS_TOKEN }}
+          RESULT_JSON: /tmp/auth-e2e-result.json
+        run: python scripts/auth_e2e_test.py
+
+      # -- Parse results --
+      - name: Parse test results
+        if: steps.pr.outputs.skip != 'true'
+        id: results
+        run: |
+          if [ -f /tmp/auth-e2e-result.json ]; then
+            RECORDING=$(python3 -c "import json; d=json.load(open('/tmp/auth-e2e-result.json')); print(d.get('recording_url',''))")
+            DURATION=$(python3 -c "import json; d=json.load(open('/tmp/auth-e2e-result.json')); print(d.get('duration_s','?'))")
+            TEST_EMAIL=$(python3 -c "import json; d=json.load(open('/tmp/auth-e2e-result.json')); print(d.get('test_email',''))")
+
+            # Build step details
+            STEP_LINES=$(python3 -c "
+          import json
+          d = json.load(open('/tmp/auth-e2e-result.json'))
+          for i, s in enumerate(d.get('steps', []), 1):
+              icon = '✅' if s['passed'] else '❌'
+              detail = f\" ({s['detail']})\" if s.get('detail') else ''
+              print(f\"{i}. {icon} {s['name']}{detail}\")
+          ")
+          else
+            RECORDING=""
+            DURATION="?"
+            TEST_EMAIL=""
+            STEP_LINES="No result file produced"
+          fi
+
+          # Export as multiline output
+          echo "recording=$RECORDING" >> "$GITHUB_OUTPUT"
+          echo "duration=$DURATION" >> "$GITHUB_OUTPUT"
+          echo "test_email=$TEST_EMAIL" >> "$GITHUB_OUTPUT"
+          {
+            echo "step_lines<<STEPS_EOF"
+            echo "$STEP_LINES"
+            echo "STEPS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # -- Sticky PR comment --
+      - name: Post or update PR comment
+        if: steps.pr.outputs.skip != 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.pr.outputs.number }}
+          header: auth-e2e
+          message: |
+            🔐 **Auth E2E — Magic Link Flow**
+
+            | | |
+            |---|---|
+            | **Status** | ${{ steps.test.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
+            | **Preview** | [${{ github.event.deployment_status.environment_url }}](${{ github.event.deployment_status.environment_url }}) |
+            | **Recording** | [Watch on Browserbase](${{ steps.results.outputs.recording }}) |
+            | **Duration** | ${{ steps.results.outputs.duration }}s |
+            | **Test Email** | `${{ steps.results.outputs.test_email }}` |
+
+            <details><summary>Test Steps</summary>
+
+            ${{ steps.results.outputs.step_lines }}
+
+            </details>
+
+      # -- Fail the check if test failed --
+      - name: Require auth E2E pass
+        if: steps.pr.outputs.skip != 'true' && steps.test.outcome == 'failure'
+        run: |
+          echo "Auth E2E test failed — see PR comment for details."
+          exit 1

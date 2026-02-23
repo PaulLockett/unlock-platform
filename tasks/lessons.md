@@ -612,6 +612,23 @@ causing `grep -c` to report 2 failures for 1 actual failure.
 reliable single-source count. Verbose output lines contain status keywords in both the per-test
 line and the summary, making `grep -c` unreliable.
 
+## 2026-02-23: Vercel deployment_status uses commit SHA as ref, not branch name
+
+**Problem:** Auth E2E workflow used `github.event.deployment.ref` to find the PR via
+`gh pr list --head "$REF"`. But Vercel's GitHub integration sets `ref` to the commit SHA
+(e.g., `31e542d1ecd...`), not the branch name. The `--head` flag expects a branch name, so
+PR lookup always returned empty.
+
+**Fix:** Use `github.event.deployment.sha` and match against PR HEAD SHA:
+```bash
+gh pr list --state open --json number,headRefOid \
+  --jq '.[] | select(.headRefOid == "$SHA") | .number'
+```
+
+**Rule:** For `deployment_status` workflows triggered by Vercel (or other third-party deployers),
+always use the SHA to find the associated PR. Don't assume `deployment.ref` is a branch name —
+the format depends on the deployer's GitHub integration.
+
 ## 2026-02-20: Auth callback must resolve origin from proxy headers, not request.url
 
 **Problem:** `/auth/callback` route used `new URL(request.url).origin` for redirects. Behind any
