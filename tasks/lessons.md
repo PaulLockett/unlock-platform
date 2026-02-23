@@ -612,22 +612,24 @@ causing `grep -c` to report 2 failures for 1 actual failure.
 reliable single-source count. Verbose output lines contain status keywords in both the per-test
 line and the summary, making `grep -c` unreliable.
 
-## 2026-02-23: Vercel deployment_status uses commit SHA as ref, not branch name
+## 2026-02-23: deployment_status workflows only run from the default branch
 
-**Problem:** Auth E2E workflow used `github.event.deployment.ref` to find the PR via
-`gh pr list --head "$REF"`. But Vercel's GitHub integration sets `ref` to the commit SHA
-(e.g., `31e542d1ecd...`), not the branch name. The `--head` flag expects a branch name, so
-PR lookup always returned empty.
+**Problem:** Auth E2E workflow used `on: deployment_status` to trigger after Vercel preview
+deployments. The workflow existed on `feat/auth` but never fired — zero runs in Actions.
 
-**Fix:** Use `github.event.deployment.sha` and match against PR HEAD SHA:
-```bash
-gh pr list --state open --json number,headRefOid \
-  --jq '.[] | select(.headRefOid == "$SHA") | .number'
-```
+**Root cause:** GitHub's `deployment_status` event only triggers workflows defined on the
+**default branch** (usually `main`). Unlike `pull_request` which uses the workflow from the
+PR branch, `deployment_status` is a repository-level event. The workflow must be merged to
+`main` before it can run.
 
-**Rule:** For `deployment_status` workflows triggered by Vercel (or other third-party deployers),
-always use the SHA to find the associated PR. Don't assume `deployment.ref` is a branch name —
-the format depends on the deployer's GitHub integration.
+**Fix:** Switched to `on: pull_request` + a deployment polling step that waits for the Vercel
+preview to become ready by querying `GET /repos/{owner}/{repo}/deployments?sha={HEAD_SHA}`.
+This runs from the PR branch and polls up to 10 minutes for the Vercel deployment to succeed.
+
+**Rule:** For workflows that need to run on PR branches AND respond to third-party deployments
+(Vercel, Netlify, etc.), use `pull_request` trigger with deployment status polling — not
+`deployment_status`. Reserve `deployment_status` for workflows that can live permanently on
+`main` (like post-deploy smoke tests).
 
 ## 2026-02-20: Auth callback must resolve origin from proxy headers, not request.url
 

@@ -1,71 +1,90 @@
 name: Auth Bot
 
-# Triggered by Vercel deployment status — runs after a preview deployment
-# is live and accessible. The deployment_status event provides the URL
-# directly, so no polling or guessing needed.
+# Runs on pull_request events — waits for Vercel preview deployment to go
+# live, then exercises the full magic link auth flow via Browserbase + Resend.
+#
+# NOTE: deployment_status would be cleaner (URL provided directly) but it
+# only triggers workflows on the default branch. Since this workflow needs
+# to run from the PR branch, we use pull_request + deployment polling.
 on:
-  deployment_status:
+  pull_request:
+    types: [opened, reopened, synchronize]
 
 permissions:
   pull-requests: write
+  deployments: read
 
 jobs:
   auth-e2e:
     name: Auth — E2E magic link
-    # Only run when a preview deployment succeeds
-    if: |
-      github.event.deployment_status.state == 'success' &&
-      github.event.deployment.environment == 'Preview'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # -- Wait for Vercel preview deployment --
+      # Vercel creates a GitHub deployment on each push. We poll the
+      # deployments API until we find a successful "Preview" deployment
+      # for this commit's SHA.
+      - name: Wait for Vercel preview
+        id: vercel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          echo "Waiting for Vercel preview deployment for $SHA..."
+
+          for i in $(seq 1 40); do
+            # Query deployments for this SHA
+            URL=$(gh api "repos/${{ github.repository }}/deployments?sha=$SHA&environment=Preview" \
+              --jq '.[0].id' 2>/dev/null || echo "")
+
+            if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+              DEPLOY_ID="$URL"
+              # Check deployment status
+              STATE=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOY_ID/statuses" \
+                --jq '.[0].state' 2>/dev/null || echo "")
+              ENV_URL=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOY_ID/statuses" \
+                --jq '.[0].environment_url' 2>/dev/null || echo "")
+
+              if [ "$STATE" = "success" ] && [ -n "$ENV_URL" ] && [ "$ENV_URL" != "null" ]; then
+                echo "Vercel preview is live: $ENV_URL"
+                echo "url=$ENV_URL" >> "$GITHUB_OUTPUT"
+                echo "ready=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "  Attempt $i: deployment $DEPLOY_ID state=$STATE"
+            else
+              echo "  Attempt $i: no deployment found yet"
+            fi
+
+            sleep 15
+          done
+
+          echo "Timed out waiting for Vercel preview (10 min)"
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+
       # -- Python + dependencies --
       - name: Set up Python
+        if: steps.vercel.outputs.ready == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install test dependencies
+        if: steps.vercel.outputs.ready == 'true'
         run: pip install httpx playwright
 
       - name: Install Playwright Chromium
+        if: steps.vercel.outputs.ready == 'true'
         run: playwright install chromium
-
-      # -- Resolve PR number from deployment ref --
-      # deployment_status events don't carry the PR number directly.
-      # We look it up from the deployment ref (the branch name).
-      - name: Find PR number
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SHA="${{ github.event.deployment.sha }}"
-          echo "Deployment SHA: $SHA"
-
-          # Vercel uses the commit SHA as deployment ref, not the branch name.
-          # Search for an open PR whose HEAD matches this SHA.
-          PR_NUMBER=$(gh pr list --state open \
-            --json number,headRefOid \
-            --jq ".[] | select(.headRefOid == \"$SHA\") | .number" \
-            2>/dev/null | head -1 || echo "")
-
-          if [ -z "$PR_NUMBER" ]; then
-            echo "No open PR found for SHA $SHA — skipping"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "PR #$PR_NUMBER"
-            echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
 
       # -- Run E2E test --
       - name: Run auth E2E test
-        if: steps.pr.outputs.skip != 'true'
+        if: steps.vercel.outputs.ready == 'true'
         id: test
         continue-on-error: true
         env:
-          VERCEL_PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
+          VERCEL_PREVIEW_URL: ${{ steps.vercel.outputs.url }}
           BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
           BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
@@ -75,7 +94,7 @@ jobs:
 
       # -- Parse results --
       - name: Parse test results
-        if: steps.pr.outputs.skip != 'true'
+        if: steps.vercel.outputs.ready == 'true'
         id: results
         run: |
           if [ -f /tmp/auth-e2e-result.json ]; then
@@ -111,10 +130,9 @@ jobs:
 
       # -- Sticky PR comment --
       - name: Post or update PR comment
-        if: steps.pr.outputs.skip != 'true'
+        if: steps.vercel.outputs.ready == 'true'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          number: ${{ steps.pr.outputs.number }}
           header: auth-e2e
           message: |
             🔐 **Auth E2E — Magic Link Flow**
@@ -122,7 +140,7 @@ jobs:
             | | |
             |---|---|
             | **Status** | ${{ steps.test.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
-            | **Preview** | [${{ github.event.deployment_status.environment_url }}](${{ github.event.deployment_status.environment_url }}) |
+            | **Preview** | [${{ steps.vercel.outputs.url }}](${{ steps.vercel.outputs.url }}) |
             | **Recording** | [Watch on Browserbase](${{ steps.results.outputs.recording }}) |
             | **Duration** | ${{ steps.results.outputs.duration }}s |
             | **Test Email** | `${{ steps.results.outputs.test_email }}` |
@@ -133,9 +151,22 @@ jobs:
 
             </details>
 
+      # -- Comment if Vercel timed out --
+      - name: Post timeout comment
+        if: steps.vercel.outputs.ready != 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: auth-e2e
+          message: |
+            🔐 **Auth E2E — Magic Link Flow**
+
+            | | |
+            |---|---|
+            | **Status** | ⚠️ Skipped — Vercel preview not ready within 10 min |
+
       # -- Fail the check if test failed --
       - name: Require auth E2E pass
-        if: steps.pr.outputs.skip != 'true' && steps.test.outcome == 'failure'
+        if: steps.vercel.outputs.ready == 'true' && steps.test.outcome == 'failure'
         run: |
           echo "Auth E2E test failed — see PR comment for details."
           exit 1
