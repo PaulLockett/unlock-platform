@@ -583,6 +583,22 @@ treat it as idempotent success.
 **Rule:** Temporal Cloud error handling isn't always predictable at the SDK exception-type level.
 For idempotent operations, add message-based fallback detection in addition to status code checks.
 
+## 2026-02-20: PyJWT requires audience parameter when token contains aud claim
+
+**Problem:** JWT tests failed with `InvalidAudienceError: Invalid audience`. Supabase JWTs
+always include `"aud": "authenticated"`, but `pyjwt.decode()` was called without specifying
+an `audience` parameter.
+
+**Root cause:** PyJWT 2.x validates the `aud` claim bidirectionally — if the token has `aud`,
+the decoder MUST specify `audience=`. If the decoder specifies `audience=`, the token MUST have
+`aud`. Omitting either side raises an error.
+
+**Fix:** Added `audience="authenticated"` to `pyjwt.decode()`. All Supabase JWTs use this
+audience value for authenticated users.
+
+**Rule:** When decoding Supabase JWTs with PyJWT, always pass `audience="authenticated"`.
+Any test tokens must also include `"aud": "authenticated"` in their payload.
+
 ## 2026-02-20: grep -c double-counts in pytest verbose output
 
 **Problem:** Temporal Bot workflow used `grep -c "FAILED"` to count failed tests, but in verbose
@@ -595,3 +611,41 @@ causing `grep -c` to report 2 failures for 1 actual failure.
 **Rule:** When parsing pytest results in CI, always use the summary line — it's the only
 reliable single-source count. Verbose output lines contain status keywords in both the per-test
 line and the summary, making `grep -c` unreliable.
+
+## 2026-02-23: deployment_status workflows only run from the default branch
+
+**Problem:** Auth E2E workflow used `on: deployment_status` to trigger after Vercel preview
+deployments. The workflow existed on `feat/auth` but never fired — zero runs in Actions.
+
+**Root cause:** GitHub's `deployment_status` event only triggers workflows defined on the
+**default branch** (usually `main`). Unlike `pull_request` which uses the workflow from the
+PR branch, `deployment_status` is a repository-level event. The workflow must be merged to
+`main` before it can run.
+
+**Fix:** Switched to `on: pull_request` + a deployment polling step that waits for the Vercel
+preview to become ready by querying `GET /repos/{owner}/{repo}/deployments?sha={HEAD_SHA}`.
+This runs from the PR branch and polls up to 10 minutes for the Vercel deployment to succeed.
+
+**Rule:** For workflows that need to run on PR branches AND respond to third-party deployments
+(Vercel, Netlify, etc.), use `pull_request` trigger with deployment status polling — not
+`deployment_status`. Reserve `deployment_status` for workflows that can live permanently on
+`main` (like post-deploy smoke tests).
+
+## 2026-02-20: Auth callback must resolve origin from proxy headers, not request.url
+
+**Problem:** `/auth/callback` route used `new URL(request.url).origin` for redirects. Behind any
+reverse proxy (cloudflared, Railway, Vercel, nginx), `request.url` resolves to the internal server
+address (e.g., `http://localhost:3000`), not the external-facing URL. Browserbase manual testing
+caught this — the callback redirected to `localhost` which the cloud browser couldn't reach.
+
+**Root cause:** Next.js route handlers receive `request.url` as the URL the server sees, not the
+URL the client used. The middleware's `request.nextUrl` has similar behavior. Proxy headers
+(`X-Forwarded-Host`, `X-Forwarded-Proto`) carry the real client-facing origin.
+
+**Fix:** Added `resolveOrigin()` helper that reads `x-forwarded-host` and `x-forwarded-proto`
+headers, falling back to `request.nextUrl.origin` when not behind a proxy. The middleware already
+used `request.nextUrl.clone()` which works because Next.js middleware has different URL resolution.
+
+**Rule:** In Next.js App Router route handlers, never use `new URL(request.url).origin` for
+redirects — it will break behind any reverse proxy. Use forwarded headers explicitly, or use
+`request.nextUrl.clone()` in middleware. This applies to all server-rendered redirect logic.

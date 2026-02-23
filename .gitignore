@@ -52,3 +52,5 @@ supabase/.temp/
 
 # Claude Code
 .claude/
+test-artifacts/
+.vercel
