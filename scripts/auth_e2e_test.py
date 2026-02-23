@@ -194,31 +194,25 @@ def run_test() -> dict:
             page = context.pages[0] if context.pages else context.new_page()
             page.set_default_timeout(PAGE_LOAD_TIMEOUT)
 
-            # --- Step 2: Set bypass cookie for Vercel deployment protection ---
-            parsed = urlparse(VERCEL_PREVIEW_URL)
-            context.add_cookies(
-                [
-                    {
-                        "name": "__vercel_protection_bypass",
-                        "value": BYPASS_TOKEN,
-                        "domain": parsed.hostname,
-                        "path": "/",
-                        "httpOnly": False,
-                        "secure": True,
-                        "sameSite": "None",
-                    },
-                    {
-                        "name": "x-vercel-protection-bypass",
-                        "value": BYPASS_TOKEN,
-                        "domain": parsed.hostname,
-                        "path": "/",
-                        "httpOnly": False,
-                        "secure": True,
-                        "sameSite": "None",
-                    },
-                ]
+            # --- Step 2: Bypass Vercel deployment protection ---
+            # Cookie-based bypass doesn't work from third-party browsers
+            # (Browserbase) due to SameSite restrictions. Instead, hit
+            # any page with the bypass query params — Vercel sets the
+            # cookie on the response, which persists for subsequent navs.
+            bypass_url = (
+                f"{VERCEL_PREVIEW_URL}/"
+                f"?x-vercel-protection-bypass={BYPASS_TOKEN}"
+                f"&x-vercel-set-bypass-cookie=samesitenone"
             )
-            step("Set Vercel bypass cookie")
+            page.goto(bypass_url, wait_until="networkidle")
+            # Verify we didn't get redirected to Vercel login
+            if "vercel.com/login" in page.url:
+                step(
+                    "Bypassed Vercel deployment protection",
+                    passed=False,
+                    detail=f"Still redirected to Vercel login: {page.url}",
+                )
+            step("Bypassed Vercel deployment protection")
 
             # --- Step 3: Navigate to /login ---
             login_url = f"{VERCEL_PREVIEW_URL}/login"
