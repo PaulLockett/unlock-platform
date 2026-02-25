@@ -46,7 +46,12 @@ from unlock_data_manager.workflows.configure import ConfigureWorkflow
 from unlock_data_manager.workflows.ingest import IngestWorkflow
 from unlock_data_manager.workflows.query import QueryWorkflow
 from unlock_data_manager.workflows.share import ShareWorkflow
-from unlock_llm_gateway.activities import hello_llm_assess
+from unlock_llm_gateway.activities import (
+    analyze_data,
+    draft_schema,
+    hello_llm_assess,
+    translate_query,
+)
 from unlock_scheduler.activities import (
     cancel_harvest,
     describe_harvest,
@@ -139,7 +144,7 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "llm-gateway": ComponentConfig(
         task_queue=LLM_GATEWAY_QUEUE,
-        activities=[hello_llm_assess],
+        activities=[translate_query, draft_schema, analyze_data, hello_llm_assess],
     ),
     "scheduler": ComponentConfig(
         task_queue=SCHEDULER_QUEUE,
