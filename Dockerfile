@@ -2,6 +2,8 @@
 #
 # Each Railway service sets COMPONENT=<name> in its environment variables.
 # The runner reads COMPONENT to decide which workflows/activities to register.
+# Services: source-access, data-access, config-access, transform-engine,
+# schema-engine, access-engine, llm-gateway, data-manager, scheduler.
 #
 # Local usage:
 #   COMPONENT=data-manager uv run python -m unlock_workers.runner
