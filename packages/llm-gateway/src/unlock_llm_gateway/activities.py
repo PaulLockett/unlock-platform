@@ -10,11 +10,16 @@ to direct API calls, would this operation name still make sense?"
 
 Activities never raise — they return success=False on error so workflows
 can handle failures without exception machinery.
+
+Flush runs inside the sync wrappers (same thread as DSPy) so it never
+blocks the async event loop. Flush failures are always caught — logging
+must never break business logic.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import dspy
 from temporalio import activity
@@ -37,13 +42,30 @@ from unlock_llm_gateway.programs import (
 from unlock_llm_gateway.tools import describe_table, execute_sql, list_tables
 
 
+def _safe_flush(collector: LmCallCollector, activity_name: str) -> None:
+    """Flush LM calls to the database. Never raises.
+
+    Logging must not break business logic — any exception is swallowed.
+    """
+    with contextlib.suppress(Exception):
+        flush_lm_calls(collector, activity_name)
+
+
 def _run_translate(
     question: str, schema_context: str, model: str, collector: LmCallCollector,
 ) -> dict:
-    """Sync wrapper for translate_query DSPy program."""
+    """Sync wrapper for translate_query DSPy program.
+
+    Runs the program inside dspy.context (setting LM + callbacks),
+    then flushes LM call logs in the same thread. Flush is in a finally
+    block so it runs even when the program raises.
+    """
     lm = get_lm(model)
-    with dspy.context(lm=lm, callbacks=[collector]):
-        return run_translate_query(question, schema_context, lm)
+    try:
+        with dspy.context(lm=lm, callbacks=[collector]):
+            return run_translate_query(question, schema_context)
+    finally:
+        _safe_flush(collector, "translate_query")
 
 
 def _run_draft(
@@ -51,16 +73,22 @@ def _run_draft(
 ) -> dict:
     """Sync wrapper for draft_schema DSPy program."""
     lm = get_lm(model)
-    with dspy.context(lm=lm, callbacks=[collector]):
-        return run_draft_schema(description, existing_context, lm)
+    try:
+        with dspy.context(lm=lm, callbacks=[collector]):
+            return run_draft_schema(description, existing_context)
+    finally:
+        _safe_flush(collector, "draft_schema")
 
 
 def _run_analyze(question: str, model: str, collector: LmCallCollector) -> dict:
     """Sync wrapper for analyze_data DSPy program with database tools."""
     lm = get_lm(model)
     tools = [execute_sql, list_tables, describe_table]
-    with dspy.context(lm=lm, callbacks=[collector]):
-        return run_analyze_data(question, tools, lm)
+    try:
+        with dspy.context(lm=lm, callbacks=[collector]):
+            return run_analyze_data(question, tools)
+    finally:
+        _safe_flush(collector, "analyze_data")
 
 
 @activity.defn
@@ -76,7 +104,6 @@ async def translate_query(req: TranslateQueryRequest) -> TranslateQueryResult:
         result = await asyncio.to_thread(
             _run_translate, req.question, req.schema_context, req.model, collector
         )
-        flush_lm_calls(collector, "translate_query")
         return TranslateQueryResult(
             success=True,
             message="Query translated successfully",
@@ -84,7 +111,6 @@ async def translate_query(req: TranslateQueryRequest) -> TranslateQueryResult:
             explanation=result["explanation"],
         )
     except Exception as e:
-        flush_lm_calls(collector, "translate_query")
         return TranslateQueryResult(
             success=False,
             message=f"Failed to translate query: {e}",
@@ -104,7 +130,6 @@ async def draft_schema(req: DraftSchemaRequest) -> DraftSchemaResult:
         result = await asyncio.to_thread(
             _run_draft, req.description, req.existing_context, req.model, collector
         )
-        flush_lm_calls(collector, "draft_schema")
         return DraftSchemaResult(
             success=True,
             message="Schema drafted successfully",
@@ -112,7 +137,6 @@ async def draft_schema(req: DraftSchemaRequest) -> DraftSchemaResult:
             explanation=result["explanation"],
         )
     except Exception as e:
-        flush_lm_calls(collector, "draft_schema")
         return DraftSchemaResult(
             success=False,
             message=f"Failed to draft schema: {e}",
@@ -133,7 +157,6 @@ async def analyze_data(req: AnalyzeDataRequest) -> AnalyzeDataResult:
         result = await asyncio.to_thread(
             _run_analyze, req.question, req.model, collector
         )
-        flush_lm_calls(collector, "analyze_data")
         return AnalyzeDataResult(
             success=True,
             message="Analysis complete",
@@ -142,7 +165,6 @@ async def analyze_data(req: AnalyzeDataRequest) -> AnalyzeDataResult:
             trajectory=result.get("trajectory", ""),
         )
     except Exception as e:
-        flush_lm_calls(collector, "analyze_data")
         return AnalyzeDataResult(
             success=False,
             message=f"Failed to analyze data: {e}",

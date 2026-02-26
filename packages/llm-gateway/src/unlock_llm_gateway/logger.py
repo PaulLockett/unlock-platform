@@ -98,6 +98,9 @@ def flush_lm_calls(
 ) -> FlushStats:
     """Write collected LM calls to unlock.lm_calls. Best-effort.
 
+    Uses a single batch INSERT for efficiency. If the batch fails,
+    all records are reported as errors.
+
     Args:
         collector: The LmCallCollector that captured calls.
         activity_name: Name of the activity that ran (e.g. "translate_query").
@@ -111,30 +114,28 @@ def flush_lm_calls(
 
     stats = FlushStats()
 
+    records = [
+        {
+            "activity_name": activity_name,
+            "model": record.model,
+            "prompt_messages": record.prompt_messages,
+            "completion": record.completion,
+            "input_tokens": record.input_tokens,
+            "output_tokens": record.output_tokens,
+            "latency_ms": record.latency_ms,
+            "error": record.error or None,
+            "caller_workflow_id": caller_workflow_id or None,
+        }
+        for record in collector.calls
+    ]
+
     try:
         engine = get_sync_engine()
         with engine.begin() as conn:
-            for record in collector.calls:
-                try:
-                    conn.execute(
-                        lm_calls.insert().values(
-                            activity_name=activity_name,
-                            model=record.model,
-                            prompt_messages=record.prompt_messages,
-                            completion=record.completion,
-                            input_tokens=record.input_tokens,
-                            output_tokens=record.output_tokens,
-                            latency_ms=record.latency_ms,
-                            error=record.error or None,
-                            caller_workflow_id=caller_workflow_id or None,
-                        )
-                    )
-                    stats.flushed += 1
-                except Exception as e:
-                    stats.errors += 1
-                    stats.error_messages.append(str(e))
+            conn.execute(lm_calls.insert(), records)
+            stats.flushed = len(records)
     except Exception as e:
-        stats.errors += len(collector.calls)
-        stats.error_messages.append(f"Engine/connection error: {e}")
+        stats.errors = len(records)
+        stats.error_messages.append(f"Flush error: {e}")
 
     return stats

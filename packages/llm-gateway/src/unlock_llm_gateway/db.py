@@ -52,6 +52,12 @@ def get_sync_engine() -> Engine:
 
 
 def reset_engine() -> None:
-    """Reset the engine singleton — used in tests to inject mocks."""
+    """Reset the engine singleton — used in tests to inject mocks.
+
+    Disposes existing connections before clearing the reference to
+    prevent connection leaks.
+    """
     global _engine
+    if _engine is not None:
+        _engine.dispose()
     _engine = None

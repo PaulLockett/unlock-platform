@@ -4,10 +4,11 @@ Three programs, each a thin wrapper around a DSPy module:
 
 1. run_translate_query — ChainOfThought NL to SQL
 2. run_draft_schema — ChainOfThought NL to schema definition
-3. run_analyze_data — RLM iterative QnA with database tools
+3. run_analyze_data — ReAct iterative QnA with database tools
 
-All programs accept an `lm` parameter and use `dspy.context(lm=lm)` for
-per-call isolation. This avoids global state between concurrent activities.
+Programs do NOT set their own dspy.context — they inherit the caller's
+context (set by the sync wrappers in activities.py). This ensures that
+callbacks (like LmCallCollector) survive through program execution.
 
 These are sync functions — activities wrap them in asyncio.to_thread().
 """
@@ -19,19 +20,19 @@ from typing import Any
 import dspy
 
 
-def run_translate_query(question: str, schema_context: str, lm: dspy.LM) -> dict[str, str]:
+def run_translate_query(question: str, schema_context: str) -> dict[str, str]:
     """Translate a natural language question to SQL.
 
     Uses ChainOfThought for step-by-step reasoning about the schema before
     producing the SQL query.
 
+    Relies on the caller's dspy.context for LM and callbacks.
+
     Returns:
         Dict with "sql_query" and "explanation" keys.
     """
     program = dspy.ChainOfThought("question, schema_context -> sql_query, explanation")
-
-    with dspy.context(lm=lm):
-        result = program(question=question, schema_context=schema_context)
+    result = program(question=question, schema_context=schema_context)
 
     return {
         "sql_query": result.sql_query,
@@ -39,19 +40,19 @@ def run_translate_query(question: str, schema_context: str, lm: dspy.LM) -> dict
     }
 
 
-def run_draft_schema(description: str, existing_context: str, lm: dspy.LM) -> dict[str, str]:
+def run_draft_schema(description: str, existing_context: str) -> dict[str, str]:
     """Generate a data model / schema definition from a natural language description.
 
     Uses ChainOfThought to reason about the description and existing context
     before producing a JSON schema definition.
 
+    Relies on the caller's dspy.context for LM and callbacks.
+
     Returns:
         Dict with "schema_definition" and "explanation" keys.
     """
     program = dspy.ChainOfThought("description, existing_context -> schema_definition, explanation")
-
-    with dspy.context(lm=lm):
-        result = program(description=description, existing_context=existing_context)
+    result = program(description=description, existing_context=existing_context)
 
     return {
         "schema_definition": result.schema_definition,
@@ -62,7 +63,6 @@ def run_draft_schema(description: str, existing_context: str, lm: dspy.LM) -> di
 def run_analyze_data(
     question: str,
     tools: list[Any],
-    lm: dspy.LM,
 ) -> dict[str, Any]:
     """Answer analytical questions via iterative SQL + reasoning + Python computation.
 
@@ -71,10 +71,11 @@ def run_analyze_data(
     caller doesn't see any of this iteration — it's a function call in, structured
     answer out.
 
+    Relies on the caller's dspy.context for LM and callbacks.
+
     Args:
         question: The analytical question to answer.
         tools: List of tool functions (execute_sql, list_tables, describe_table).
-        lm: Configured DSPy LM instance.
 
     Returns:
         Dict with "answer", "sql_queries" (list), and "trajectory" keys.
@@ -83,9 +84,7 @@ def run_analyze_data(
         "question -> answer",
         tools=tools,
     )
-
-    with dspy.context(lm=lm):
-        result = program(question=question)
+    result = program(question=question)
 
     # Extract trajectory from the ReAct execution for logging
     trajectory = ""
