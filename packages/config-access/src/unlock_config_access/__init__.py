@@ -1,1 +1,1 @@
-"""Config Access: pipeline and schema configuration activities."""
+"""Config Access: pipeline and schema configuration activities (Upstash Redis)."""
