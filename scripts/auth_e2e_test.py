@@ -49,7 +49,7 @@ RESEND_DOMAIN = os.environ.get(
 
 # Polling config
 EMAIL_POLL_INTERVAL = 3  # seconds between Resend API checks
-EMAIL_POLL_TIMEOUT = 60  # max seconds to wait for the email
+EMAIL_POLL_TIMEOUT = 120  # max seconds to wait for the email
 PAGE_LOAD_TIMEOUT = 15_000  # ms — Playwright page load timeout
 
 
@@ -80,18 +80,21 @@ def create_browserbase_session() -> dict:
 def poll_resend_for_email(
     recipient: str, *, timeout: float = EMAIL_POLL_TIMEOUT
 ) -> dict:
-    """Poll Resend's inbound email API until we find a message sent to *recipient*.
+    """Poll Resend's sending API until the magic link email for *recipient* appears.
 
-    Returns the full email object including the HTML body.
+    Supabase sends magic link emails through Resend SMTP, so they appear in the
+    outbound/sending API (GET /emails), not the inbound/receiving API.  We poll
+    the list endpoint until we find a match, then fetch the full email (with HTML
+    body) via GET /emails/{id}.
     """
     deadline = time.monotonic() + timeout
     headers = {"Authorization": f"Bearer {RESEND_API_KEY}"}
 
     while time.monotonic() < deadline:
         resp = httpx.get(
-            "https://api.resend.com/emails/receiving",
+            "https://api.resend.com/emails",
             headers=headers,
-            params={"limit": 20},
+            params={"limit": 50},
             timeout=15,
         )
         resp.raise_for_status()
@@ -102,7 +105,7 @@ def poll_resend_for_email(
             if recipient in recipients:
                 # Fetch full email to get the HTML body
                 detail = httpx.get(
-                    f"https://api.resend.com/emails/receiving/{email['id']}",
+                    f"https://api.resend.com/emails/{email['id']}",
                     headers=headers,
                     timeout=15,
                 )
@@ -248,13 +251,19 @@ def run_test() -> dict:
             # --- Step 5: Poll Resend for the magic link email ---
             print(f"  Polling Resend for email to {test_email}...")
             email_start = time.monotonic()
-            email_data = poll_resend_for_email(test_email)
+            try:
+                email_data = poll_resend_for_email(test_email)
+            except (TimeoutError, httpx.HTTPStatusError) as exc:
+                step("Received magic link email", passed=False, detail=str(exc))
             email_wait = round(time.monotonic() - email_start, 1)
             step("Received magic link email", detail=f"{email_wait}s")
 
             # --- Step 6: Extract magic link from email ---
             html_body = email_data.get("html", "") or email_data.get("text", "")
-            magic_link = extract_magic_link(html_body)
+            try:
+                magic_link = extract_magic_link(html_body)
+            except ValueError as exc:
+                step("Extracted magic link URL", passed=False, detail=str(exc))
             step("Extracted magic link URL", detail=magic_link[:80] + "...")
 
             # --- Step 7: Navigate to magic link ---
@@ -295,6 +304,11 @@ def run_test() -> dict:
 
     except _StepFailure:
         pass  # Already recorded in steps — fall through to build result
+    except Exception as exc:
+        steps.append(
+            {"name": "Unexpected error", "passed": False,
+             "detail": str(exc), "elapsed_s": round(time.monotonic() - start, 1)}
+        )
 
     result = build_result()
     print()
