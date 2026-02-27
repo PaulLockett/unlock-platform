@@ -90,26 +90,31 @@ def poll_resend_for_email(
     deadline = time.monotonic() + timeout
     headers = {"Authorization": f"Bearer {RESEND_API_KEY}"}
 
+    def _get(url: str, **kwargs) -> httpx.Response:
+        """GET with retry on 429 rate limits."""
+        for attempt in range(4):
+            resp = httpx.get(url, headers=headers, timeout=15, **kwargs)
+            if resp.status_code != 429:
+                resp.raise_for_status()
+                return resp
+            wait = 2 ** attempt  # 1, 2, 4, 8 seconds
+            print(f"    Rate limited (429), retrying in {wait}s...")
+            time.sleep(wait)
+        resp.raise_for_status()  # raise on final 429
+        return resp  # unreachable but satisfies type checkers
+
     while time.monotonic() < deadline:
-        resp = httpx.get(
+        data = _get(
             "https://api.resend.com/emails",
-            headers=headers,
-            params={"limit": 50},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+            params={"limit": 20},
+        ).json()
 
         for email in data.get("data", []):
             recipients = email.get("to", [])
             if recipient in recipients:
-                # Fetch full email to get the HTML body
-                detail = httpx.get(
+                detail = _get(
                     f"https://api.resend.com/emails/{email['id']}",
-                    headers=headers,
-                    timeout=15,
                 )
-                detail.raise_for_status()
                 return detail.json()
 
         time.sleep(EMAIL_POLL_INTERVAL)
