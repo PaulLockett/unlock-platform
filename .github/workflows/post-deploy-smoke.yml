@@ -1,0 +1,169 @@
+name: "Post-Deploy Smoke Test"
+
+# Runs after every push to main. Waits for Railway to finish deploying,
+# then runs acceptance tests against production services. If anything
+# fails, auto-reverts the commit so Railway redeploys the last working
+# version, comments on the originating PR, and reopens it.
+#
+# Flow: gate (CI) → wait-for-railway → smoke-test → rollback (on failure)
+
+on:
+  push:
+    branches: [main]
+
+# Every deploy gets verified — don't cancel in-progress checks
+concurrency:
+  group: post-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate: reuse CI workflow (lint, typecheck, test)
+  # This usually hits GitHub's cache since deploy.yml triggers CI on the
+  # same commit. Fast no-op in the common case.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: "Gate — CI must pass"
+    uses: ./.github/workflows/ci.yml
+
+  # ---------------------------------------------------------------------------
+  # Wait for Railway deployments to reach terminal state.
+  # Railway deploys asynchronously — we need to know when it's done before
+  # running health checks against the live services.
+  # ---------------------------------------------------------------------------
+  wait-for-railway:
+    name: "Wait for Railway deploy"
+    needs: gate
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_status: ${{ steps.poll.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+
+      - name: Poll Railway deployments
+        id: poll
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: python scripts/poll_railway_deploy.py --env production --timeout 600 --interval 30
+
+  # ---------------------------------------------------------------------------
+  # Smoke test: run acceptance tests against production.
+  # These are the same tests that run on staging→main PRs, but now they
+  # verify the actual deployed services are healthy.
+  # ---------------------------------------------------------------------------
+  smoke-test:
+    name: "Smoke test — acceptance"
+    needs: wait-for-railway
+    if: needs.wait-for-railway.outputs.deploy_status == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync
+
+      - name: Run acceptance tests
+        env:
+          UNIPILE_API_KEY: ${{ secrets.UNIPILE_API_KEY }}
+          UNIPILE_DSN: ${{ secrets.UNIPILE_DSN }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_PROJECT_ID: ${{ secrets.POSTHOG_PROJECT_ID }}
+          RB2B_API_KEY: ${{ secrets.RB2B_API_KEY }}
+        run: |
+          uv run --package unlock-source-access pytest \
+            packages/source-access/tests/test_live_api.py \
+            -v -s -m "acceptance" --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Rollback: if smoke test or Railway deploy failed, revert the commit
+  # on main so Railway redeploys the previous working version.
+  #
+  # Also comments on the originating PR and reopens it so the fix can
+  # happen on staging before re-promoting.
+  # ---------------------------------------------------------------------------
+  rollback:
+    name: "Rollback — revert on failure"
+    needs: [wait-for-railway, smoke-test]
+    if: always() && (needs.smoke-test.result == 'failure' || needs.wait-for-railway.outputs.deploy_status != 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Revert the failing commit
+        id: revert
+        run: |
+          SHA="${{ github.sha }}"
+          echo "Reverting commit ${SHA}..."
+          git revert --no-edit "${SHA}"
+          git push origin main
+          echo "revert_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "original_sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Find originating PR
+        id: find-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA="${{ github.sha }}"
+          # Find the PR that introduced this commit
+          PR_NUMBER=$(gh pr list --state merged --search "${SHA}" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Comment and reopen PR
+        if: steps.find-pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ steps.find-pr.outputs.pr_number }}"
+          ORIGINAL_SHA="${{ steps.revert.outputs.original_sha }}"
+          REVERT_SHA="${{ steps.revert.outputs.revert_sha }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          DEPLOY_STATUS="${{ needs.wait-for-railway.outputs.deploy_status }}"
+          SMOKE_RESULT="${{ needs.smoke-test.result }}"
+
+          # Determine what failed
+          if [ "$DEPLOY_STATUS" != "success" ]; then
+            FAILURE_REASON="Railway deployment ${DEPLOY_STATUS}"
+          else
+            FAILURE_REASON="Post-deploy smoke test ${SMOKE_RESULT}"
+          fi
+
+          # Comment on the PR
+          gh pr comment "${PR_NUMBER}" --body "$(cat <<EOF
+          ## Post-Deploy Failure — Auto-Reverted
+
+          **Failure:** ${FAILURE_REASON}
+          **Reverted commit:** \`${ORIGINAL_SHA}\` → revert \`${REVERT_SHA}\`
+          **Workflow run:** [View logs](${RUN_URL})
+
+          Railway is redeploying the previous working code from the revert commit.
+
+          ### Next steps
+          1. Check the [workflow logs](${RUN_URL}) for failure details
+          2. Fix the issue on a feature branch
+          3. Test on staging
+          4. Re-promote to main via a new PR
+          EOF
+          )"
+
+          # Reopen the PR so it's visible as needing attention
+          gh pr reopen "${PR_NUMBER}" 2>/dev/null || echo "Could not reopen PR (may already be open or branch deleted)"
