@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import html as html_mod
 import json
 import os
 import re
@@ -134,13 +135,13 @@ def extract_magic_link(html: str) -> str:
     pattern = r'href=["\']([^"\']*(?:/auth/v1/verify|type=magiclink)[^"\']*)["\']'
     match = re.search(pattern, html, re.IGNORECASE)
     if match:
-        return match.group(1)
+        return html_mod.unescape(match.group(1))
 
     # Fallback: look for any long URL containing "token=" in the body
     pattern_fallback = r'(https?://[^\s"\'<>]+token=[^\s"\'<>]+)'
     match = re.search(pattern_fallback, html)
     if match:
-        return match.group(1)
+        return html_mod.unescape(match.group(1))
 
     raise ValueError("Could not extract magic link from email HTML")
 
