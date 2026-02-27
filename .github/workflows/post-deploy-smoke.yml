@@ -112,7 +112,8 @@ jobs:
         run: |
           SHA="${{ github.sha }}"
           echo "Reverting commit ${SHA}..."
-          git revert --no-edit "${SHA}"
+          # Use -m 1 for merge commits (picks first parent); harmless on non-merges
+          git revert --no-edit -m 1 "${SHA}"
           git push origin main
           echo "revert_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "original_sha=${SHA}" >> "$GITHUB_OUTPUT"
