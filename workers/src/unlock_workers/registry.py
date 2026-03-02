@@ -16,7 +16,15 @@ while maintaining complete runtime isolation between components.
 from dataclasses import dataclass, field
 from typing import Any
 
-from unlock_access_engine.activities import hello_check_access
+from unlock_access_engine.activities import (
+    compute_effective_permissions,
+    evaluate_access_decision,
+    hello_check_access,
+)
+from unlock_access_engine.workflows import (
+    CheckAccessWorkflow,
+    EvaluatePermissionsWorkflow,
+)
 from unlock_config_access.activities import (
     activate_view,
     archive_schema,
@@ -168,7 +176,12 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "access-engine": ComponentConfig(
         task_queue=ACCESS_ENGINE_QUEUE,
-        activities=[hello_check_access],
+        workflows=[CheckAccessWorkflow, EvaluatePermissionsWorkflow],
+        activities=[
+            hello_check_access,
+            evaluate_access_decision,
+            compute_effective_permissions,
+        ],
     ),
     "llm-gateway": ComponentConfig(
         task_queue=LLM_GATEWAY_QUEUE,
