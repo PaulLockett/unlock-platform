@@ -35,7 +35,7 @@ def test_non_manager_components_have_activities() -> None:
     # Components that are stubs — no activities yet
     stub_components = {"scheduler"}
     # Engines register both workflows and activities
-    engine_components = {"schema-engine"}
+    engine_components = {"transform-engine", "schema-engine"}
     for name, config in COMPONENTS.items():
         if name == "data-manager":
             continue
