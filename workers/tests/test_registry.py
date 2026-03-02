@@ -35,7 +35,7 @@ def test_non_manager_components_have_activities() -> None:
     # Components that are stubs — no activities yet
     stub_components = {"scheduler"}
     # Engines register both workflows and activities
-    engine_components = {"transform-engine"}
+    engine_components = {"transform-engine", "schema-engine"}
     for name, config in COMPONENTS.items():
         if name == "data-manager":
             continue
@@ -49,17 +49,20 @@ def test_non_manager_components_have_activities() -> None:
             )
 
 
-def test_source_access_has_four_activities() -> None:
-    """Source Access should register all four real activities."""
+def test_source_access_has_business_verb_activities() -> None:
+    """Source Access registers business verbs + deprecated CRUD aliases."""
     sa = COMPONENTS["source-access"]
-    assert len(sa.activities) == 4
     activity_names = {a.__name__ for a in sa.activities}
-    assert activity_names == {
-        "connect_source",
-        "fetch_source_data",
-        "test_connection",
-        "get_source_schema",
-    }
+    # New business verb names
+    assert "verify_source" in activity_names
+    assert "harvest_records" in activity_names
+    assert "probe_source" in activity_names
+    assert "discover_schema" in activity_names
+    # Deprecated aliases kept for backward compat
+    assert "connect_source" in activity_names
+    assert "fetch_source_data" in activity_names
+    assert "test_connection" in activity_names
+    assert "get_source_schema" in activity_names
 
 
 def test_each_component_has_unique_queue() -> None:
