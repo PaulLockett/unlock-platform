@@ -55,7 +55,15 @@ from unlock_scheduler.activities import (
     register_harvest,
     resume_harvest,
 )
-from unlock_schema_engine.activities import hello_validate_schema
+from unlock_schema_engine.activities import (
+    generate_field_mappings,
+    hello_validate_schema,
+    validate_and_detect_drift,
+)
+from unlock_schema_engine.workflows import (
+    GenerateMappingsWorkflow,
+    ValidateSchemaWorkflow,
+)
 from unlock_shared.task_queues import (
     ACCESS_ENGINE_QUEUE,
     CONFIG_ACCESS_QUEUE,
@@ -69,9 +77,13 @@ from unlock_shared.task_queues import (
 )
 from unlock_source_access.activities import (
     connect_source,
+    discover_schema,
     fetch_source_data,
     get_source_schema,
+    harvest_records,
+    probe_source,
     test_connection,
+    verify_source,
 )
 from unlock_transform_engine.activities import hello_transform
 
@@ -92,7 +104,17 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "source-access": ComponentConfig(
         task_queue=SOURCE_ACCESS_QUEUE,
-        activities=[connect_source, fetch_source_data, test_connection, get_source_schema],
+        activities=[
+            verify_source,
+            harvest_records,
+            probe_source,
+            discover_schema,
+            # Deprecated aliases — remove when callers migrate
+            connect_source,
+            fetch_source_data,
+            test_connection,
+            get_source_schema,
+        ],
     ),
     "transform-engine": ComponentConfig(
         task_queue=TRANSFORM_ENGINE_QUEUE,
@@ -131,7 +153,12 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "schema-engine": ComponentConfig(
         task_queue=SCHEMA_ENGINE_QUEUE,
-        activities=[hello_validate_schema],
+        workflows=[GenerateMappingsWorkflow, ValidateSchemaWorkflow],
+        activities=[
+            hello_validate_schema,
+            generate_field_mappings,
+            validate_and_detect_drift,
+        ],
     ),
     "access-engine": ComponentConfig(
         task_queue=ACCESS_ENGINE_QUEUE,
