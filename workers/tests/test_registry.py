@@ -26,16 +26,27 @@ def test_data_manager_has_workflows_no_activities() -> None:
     assert len(dm.activities) == 0
 
 
-def test_activity_components_have_no_workflows() -> None:
-    """Activity components should not register workflows."""
-    # Scheduler is a stub — no activities yet
+def test_non_manager_components_have_activities() -> None:
+    """Non-manager components should register at least one activity.
+
+    Engines may also register workflows (child workflows dispatched by
+    the Manager), but they must have activities too.
+    """
+    # Components that are stubs — no activities yet
     stub_components = {"scheduler"}
+    # Engines register both workflows and activities
+    engine_components = {"access-engine"}
     for name, config in COMPONENTS.items():
         if name == "data-manager":
             continue
-        assert len(config.workflows) == 0, f"{name} should not have workflows"
+        if name in engine_components:
+            assert len(config.workflows) >= 1, (
+                f"{name} should have workflows"
+            )
         if name not in stub_components:
-            assert len(config.activities) >= 1, f"{name} should have at least one activity"
+            assert len(config.activities) >= 1, (
+                f"{name} should have at least one activity"
+            )
 
 
 def test_source_access_has_four_activities() -> None:
