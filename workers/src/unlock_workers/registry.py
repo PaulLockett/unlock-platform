@@ -73,7 +73,12 @@ from unlock_source_access.activities import (
     get_source_schema,
     test_connection,
 )
-from unlock_transform_engine.activities import hello_transform
+from unlock_transform_engine.activities import (
+    apply_transform_rules,
+    hello_transform,
+    validate_pipeline,
+)
+from unlock_transform_engine.workflows import TransformWorkflow
 
 
 @dataclass
@@ -96,7 +101,8 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "transform-engine": ComponentConfig(
         task_queue=TRANSFORM_ENGINE_QUEUE,
-        activities=[hello_transform],
+        workflows=[TransformWorkflow],
+        activities=[hello_transform, apply_transform_rules, validate_pipeline],
     ),
     "data-access": ComponentConfig(
         task_queue=DATA_ACCESS_QUEUE,
