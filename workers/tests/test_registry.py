@@ -53,7 +53,7 @@ def test_source_access_has_business_verb_activities() -> None:
     """Source Access registers business verbs + deprecated CRUD aliases."""
     sa = COMPONENTS["source-access"]
     activity_names = {a.__name__ for a in sa.activities}
-    # New business verb names (added by schema-engine PR)
+    # New business verb names
     assert "verify_source" in activity_names
     assert "harvest_records" in activity_names
     assert "probe_source" in activity_names
