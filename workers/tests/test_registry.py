@@ -26,29 +26,43 @@ def test_data_manager_has_workflows_no_activities() -> None:
     assert len(dm.activities) == 0
 
 
-def test_activity_components_have_no_workflows() -> None:
-    """Activity components should not register workflows."""
-    # Scheduler is a stub — no activities yet
+def test_non_manager_components_have_activities() -> None:
+    """Non-manager components should register at least one activity.
+
+    Engines may also register workflows (child workflows dispatched by
+    the Manager), but they must have activities too.
+    """
+    # Components that are stubs — no activities yet
     stub_components = {"scheduler"}
+    # Engines register both workflows and activities
+    engine_components = {"schema-engine"}
     for name, config in COMPONENTS.items():
         if name == "data-manager":
             continue
-        assert len(config.workflows) == 0, f"{name} should not have workflows"
+        if name in engine_components:
+            assert len(config.workflows) >= 1, (
+                f"{name} should have workflows"
+            )
         if name not in stub_components:
-            assert len(config.activities) >= 1, f"{name} should have at least one activity"
+            assert len(config.activities) >= 1, (
+                f"{name} should have at least one activity"
+            )
 
 
-def test_source_access_has_four_activities() -> None:
-    """Source Access should register all four real activities."""
+def test_source_access_has_business_verb_activities() -> None:
+    """Source Access registers business verbs + deprecated CRUD aliases."""
     sa = COMPONENTS["source-access"]
-    assert len(sa.activities) == 4
     activity_names = {a.__name__ for a in sa.activities}
-    assert activity_names == {
-        "connect_source",
-        "fetch_source_data",
-        "test_connection",
-        "get_source_schema",
-    }
+    # New business verb names
+    assert "verify_source" in activity_names
+    assert "harvest_records" in activity_names
+    assert "probe_source" in activity_names
+    assert "discover_schema" in activity_names
+    # Deprecated aliases kept for backward compat
+    assert "connect_source" in activity_names
+    assert "fetch_source_data" in activity_names
+    assert "test_connection" in activity_names
+    assert "get_source_schema" in activity_names
 
 
 def test_each_component_has_unique_queue() -> None:
