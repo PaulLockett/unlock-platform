@@ -16,7 +16,15 @@ while maintaining complete runtime isolation between components.
 from dataclasses import dataclass, field
 from typing import Any
 
-from unlock_access_engine.activities import hello_check_access
+from unlock_access_engine.activities import (
+    compute_effective_permissions,
+    evaluate_access_decision,
+    hello_check_access,
+)
+from unlock_access_engine.workflows import (
+    CheckAccessWorkflow,
+    EvaluatePermissionsWorkflow,
+)
 from unlock_config_access.activities import (
     activate_view,
     archive_schema,
@@ -55,7 +63,15 @@ from unlock_scheduler.activities import (
     register_harvest,
     resume_harvest,
 )
-from unlock_schema_engine.activities import hello_validate_schema
+from unlock_schema_engine.activities import (
+    generate_field_mappings,
+    hello_validate_schema,
+    validate_and_detect_drift,
+)
+from unlock_schema_engine.workflows import (
+    GenerateMappingsWorkflow,
+    ValidateSchemaWorkflow,
+)
 from unlock_shared.task_queues import (
     ACCESS_ENGINE_QUEUE,
     CONFIG_ACCESS_QUEUE,
@@ -69,11 +85,20 @@ from unlock_shared.task_queues import (
 )
 from unlock_source_access.activities import (
     connect_source,
+    discover_schema,
     fetch_source_data,
     get_source_schema,
+    harvest_records,
+    probe_source,
     test_connection,
+    verify_source,
 )
-from unlock_transform_engine.activities import hello_transform
+from unlock_transform_engine.activities import (
+    apply_transform_rules,
+    hello_transform,
+    validate_pipeline,
+)
+from unlock_transform_engine.workflows import TransformWorkflow
 
 
 @dataclass
@@ -92,11 +117,22 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "source-access": ComponentConfig(
         task_queue=SOURCE_ACCESS_QUEUE,
-        activities=[connect_source, fetch_source_data, test_connection, get_source_schema],
+        activities=[
+            verify_source,
+            harvest_records,
+            probe_source,
+            discover_schema,
+            # Deprecated aliases — remove when callers migrate
+            connect_source,
+            fetch_source_data,
+            test_connection,
+            get_source_schema,
+        ],
     ),
     "transform-engine": ComponentConfig(
         task_queue=TRANSFORM_ENGINE_QUEUE,
-        activities=[hello_transform],
+        workflows=[TransformWorkflow],
+        activities=[hello_transform, apply_transform_rules, validate_pipeline],
     ),
     "data-access": ComponentConfig(
         task_queue=DATA_ACCESS_QUEUE,
@@ -131,11 +167,21 @@ COMPONENTS: dict[str, ComponentConfig] = {
     ),
     "schema-engine": ComponentConfig(
         task_queue=SCHEMA_ENGINE_QUEUE,
-        activities=[hello_validate_schema],
+        workflows=[GenerateMappingsWorkflow, ValidateSchemaWorkflow],
+        activities=[
+            hello_validate_schema,
+            generate_field_mappings,
+            validate_and_detect_drift,
+        ],
     ),
     "access-engine": ComponentConfig(
         task_queue=ACCESS_ENGINE_QUEUE,
-        activities=[hello_check_access],
+        workflows=[CheckAccessWorkflow, EvaluatePermissionsWorkflow],
+        activities=[
+            hello_check_access,
+            evaluate_access_decision,
+            compute_effective_permissions,
+        ],
     ),
     "llm-gateway": ComponentConfig(
         task_queue=LLM_GATEWAY_QUEUE,

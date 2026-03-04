@@ -1,20 +1,18 @@
-"""IngestWorkflow: Source Access → Transform Engine → Data Access.
+"""IngestWorkflow: Source Access → Data Access → Transform Engine.
 
-This is the primary data ingestion pipeline. It orchestrates three separate
-components, each running on its own worker:
+The primary data ingestion pipeline orchestrating three components:
+1. Open pipeline run (Data Access) — start tracking the ingestion
+2. Harvest records (Source Access) — fetch raw data from external source
+3. Catalog content (Data Access) — store raw records as ContentRecords
+4. TransformWorkflow (child workflow on Transform Engine queue) — apply pipeline
+5. Close pipeline run (Data Access) — record final metrics
 
-1. Source Access (source-access-queue): Fetch raw data from an external source
-2. Transform Engine (transform-engine-queue): Apply transformation pipeline
-3. Data Access (data-access-queue): Store the transformed result
+The Transform Engine is dispatched as a CHILD WORKFLOW, not an activity,
+because transformation is the engine's business logic. The Manager tracks the
+ingest-level pipeline run; the TransformWorkflow manages its own internal run.
 
-The workflow itself runs on data-manager-queue, but each activity is dispatched
-to the specific component's queue via `task_queue=`. This means the activity
-executes on whatever worker is listening on that queue — a completely separate
-process, potentially on a different machine.
-
-Source Access now uses typed models (FetchRequest → FetchResult) instead of
-plain strings. Transform and Data Access are still hello-world stubs — they'll
-be upgraded in their respective tasks.
+FetchResult.records (list[dict]) are mapped to ContentRecord with best-effort
+field mapping via .get() — missing fields get None/defaults.
 """
 
 from datetime import timedelta
@@ -22,15 +20,27 @@ from datetime import timedelta
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from unlock_data_access.activities import hello_store_data
-    from unlock_shared.source_models import FetchRequest, FetchResult
+    from unlock_data_access.activities import (
+        catalog_content,
+        close_pipeline_run,
+        open_pipeline_run,
+    )
+    from unlock_shared.data_models import (
+        CatalogContentRequest,
+        ClosePipelineRunRequest,
+        ContentRecord,
+        OpenPipelineRunRequest,
+    )
+    from unlock_shared.manager_models import IngestRequest, IngestResult
+    from unlock_shared.source_models import FetchRequest
     from unlock_shared.task_queues import (
         DATA_ACCESS_QUEUE,
         SOURCE_ACCESS_QUEUE,
         TRANSFORM_ENGINE_QUEUE,
     )
-    from unlock_source_access.activities import fetch_source_data
-    from unlock_transform_engine.activities import hello_transform
+    from unlock_shared.transform_models import TransformRequest
+    from unlock_source_access.activities import harvest_records
+    from unlock_transform_engine.workflows import TransformWorkflow
 
 
 @workflow.defn
@@ -38,46 +48,166 @@ class IngestWorkflow:
     """Orchestrates the full ingestion pipeline across three worker queues."""
 
     @workflow.run
-    async def run(self, source_name: str) -> str:
-        # Step 1: Fetch raw data from the source using typed models.
-        # Build a FetchRequest from the source_name — downstream tasks will
-        # pass richer configs, but for now we support the simple string interface
-        # for backward compatibility with verify_infra.py.
-        request = FetchRequest(
-            source_id=source_name,
-            source_type="unipile",
-            resource_type="posts",
-            auth_env_var="UNIPILE_API_KEY",
+    async def run(self, request: IngestRequest) -> IngestResult:
+        # Step 1: Open pipeline run for tracking
+        run_result = await workflow.execute_activity(
+            open_pipeline_run,
+            OpenPipelineRunRequest(
+                source_key=request.source_name,
+                workflow_run_id=workflow.info().workflow_id,
+                resource_type=request.resource_type,
+            ),
+            task_queue=DATA_ACCESS_QUEUE,
+            start_to_close_timeout=timedelta(seconds=30),
         )
-        fetch_result: FetchResult = await workflow.execute_activity(
-            fetch_source_data,
-            request,
+
+        if not run_result.success:
+            return IngestResult(
+                success=False,
+                message=f"Failed to open pipeline run: {run_result.message}",
+                source_name=request.source_name,
+            )
+
+        pipeline_run_id = run_result.pipeline_run_id
+
+        # Step 2: Harvest records from Source Access
+        fetch_result = await workflow.execute_activity(
+            harvest_records,
+            FetchRequest(
+                source_id=request.source_name,
+                source_type=request.source_type,
+                resource_type=request.resource_type,
+                since=request.since,
+                max_pages=request.max_pages,
+                auth_env_var=request.auth_env_var,
+                base_url=request.base_url,
+                config_json=request.config_json,
+            ),
             task_queue=SOURCE_ACCESS_QUEUE,
             start_to_close_timeout=timedelta(minutes=5),
             heartbeat_timeout=timedelta(seconds=60),
         )
 
-        # Pass a summary string to downstream stubs (they still expect strings).
-        # When Transform Engine is implemented, this will pass FetchResult directly.
-        raw_summary = (
-            f"Source Access fetched {fetch_result.record_count} records "
-            f"from '{source_name}' (success={fetch_result.success})"
+        if not fetch_result.success:
+            await self._close_run(pipeline_run_id, "failed", 0, error=fetch_result.message)
+            return IngestResult(
+                success=False,
+                message=f"Harvest failed: {fetch_result.message}",
+                source_name=request.source_name,
+                pipeline_run_id=pipeline_run_id,
+            )
+
+        records_fetched = fetch_result.record_count
+
+        if records_fetched == 0:
+            await self._close_run(pipeline_run_id, "completed", 0)
+            return IngestResult(
+                success=True,
+                message="No records to ingest",
+                source_name=request.source_name,
+                pipeline_run_id=pipeline_run_id,
+                records_fetched=0,
+            )
+
+        # Step 3: Catalog raw records as ContentRecords in Data Access
+        channel_key = request.channel_key or request.source_type
+        content_records = [
+            ContentRecord(
+                channel_key=channel_key,
+                content_type=r.get("content_type", request.resource_type),
+                source_key=request.source_name,
+                pipeline_run_id=pipeline_run_id,
+                external_id=r.get("external_id") or r.get("id"),
+                title=r.get("title"),
+                body=r.get("body") or r.get("text") or r.get("content"),
+                url=r.get("url"),
+                published_at=None,
+                like_count=r.get("like_count", 0),
+                comment_count=r.get("comment_count", 0),
+                share_count=r.get("share_count", 0),
+                view_count=r.get("view_count", 0),
+            )
+            for r in fetch_result.records
+        ]
+
+        catalog_result = await workflow.execute_activity(
+            catalog_content,
+            CatalogContentRequest(
+                records=content_records,
+                source_key=request.source_name,
+            ),
+            task_queue=DATA_ACCESS_QUEUE,
+            start_to_close_timeout=timedelta(minutes=2),
         )
 
-        # Step 2: Transform the raw data (still hello-world stub)
-        transformed = await workflow.execute_activity(
-            hello_transform,
-            raw_summary,
+        if not catalog_result.success:
+            await self._close_run(
+                pipeline_run_id, "failed", records_fetched,
+                error=catalog_result.message,
+            )
+            return IngestResult(
+                success=False,
+                message=f"Catalog failed: {catalog_result.message}",
+                source_name=request.source_name,
+                pipeline_run_id=pipeline_run_id,
+                records_fetched=records_fetched,
+            )
+
+        records_stored = catalog_result.created + catalog_result.updated
+
+        # Step 4: Dispatch TransformWorkflow as child workflow
+        transform_result = await workflow.execute_child_workflow(
+            TransformWorkflow.run,
+            TransformRequest(
+                source_type=request.source_type,
+                pipeline_run_id=pipeline_run_id,
+            ),
+            id=f"{workflow.info().workflow_id}-transform",
             task_queue=TRANSFORM_ENGINE_QUEUE,
-            start_to_close_timeout=timedelta(seconds=30),
         )
 
-        # Step 3: Store the result (still hello-world stub)
-        stored = await workflow.execute_activity(
-            hello_store_data,
-            transformed,
+        records_transformed = transform_result.records_out if transform_result.success else 0
+
+        # Step 5: Close pipeline run
+        await self._close_run(
+            pipeline_run_id,
+            "completed",
+            records_fetched,
+            records_created=records_stored,
+        )
+
+        return IngestResult(
+            success=True,
+            message=(
+                f"Ingested {records_fetched} records from '{request.source_name}': "
+                f"{records_stored} stored, {records_transformed} transformed"
+            ),
+            source_name=request.source_name,
+            pipeline_run_id=pipeline_run_id,
+            records_fetched=records_fetched,
+            records_stored=records_stored,
+            records_transformed=records_transformed,
+        )
+
+    async def _close_run(
+        self,
+        pipeline_run_id: str,
+        status: str,
+        record_count: int,
+        *,
+        records_created: int = 0,
+        error: str | None = None,
+    ) -> None:
+        """Close the pipeline run — best-effort, doesn't block on failure."""
+        await workflow.execute_activity(
+            close_pipeline_run,
+            ClosePipelineRunRequest(
+                pipeline_run_id=pipeline_run_id,
+                status=status,
+                record_count=record_count,
+                records_created=records_created,
+                error_message=error,
+            ),
             task_queue=DATA_ACCESS_QUEUE,
             start_to_close_timeout=timedelta(seconds=30),
         )
-
-        return stored
