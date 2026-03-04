@@ -233,25 +233,43 @@ def run_test() -> dict:
             )
 
             # --- Step 4: Fill in email and submit ---
-            email_input = page.locator('input[type="email"]')
-            email_input.fill(test_email)
-            page.locator('button[type="submit"]').click()
+            # Supabase may return "Error sending confirmation email" if the
+            # project hits email rate limits (common across rapid CI runs).
+            # Retry with backoff to ride out transient rate limits.
+            max_attempts = 3
+            magic_link_sent = False
+            last_error = ""
+            for attempt in range(1, max_attempts + 1):
+                email_input = page.locator('input[type="email"]')
+                email_input.fill(test_email)
+                page.locator('button[type="submit"]').click()
 
-            # Wait for the "Check your email" confirmation text
-            try:
-                page.wait_for_selector("text=Check your email", timeout=10_000)
+                try:
+                    page.wait_for_selector("text=Check your email", timeout=10_000)
+                    magic_link_sent = True
+                    break
+                except _StepFailure:
+                    raise
+                except Exception as exc:
+                    error_el = page.locator("p.text-red-600, p.text-red-400")
+                    last_error = (
+                        error_el.text_content() if error_el.count() > 0 else str(exc)
+                    )
+                    if attempt < max_attempts:
+                        wait = 10 * attempt  # 10s, 20s
+                        print(f"    Attempt {attempt}/{max_attempts} failed: {last_error}")
+                        print(f"    Retrying in {wait}s...")
+                        page.wait_for_timeout(wait * 1000)
+                        # Reload login page for a clean form state
+                        page.goto(login_url, wait_until="networkidle")
+
+            if magic_link_sent:
                 step("Submitted magic link request", detail=test_email)
-            except _StepFailure:
-                raise
-            except Exception as exc:
-                error_el = page.locator("p.text-red-600, p.text-red-400")
-                error_text = (
-                    error_el.text_content() if error_el.count() > 0 else str(exc)
-                )
+            else:
                 step(
                     "Submitted magic link request",
                     passed=False,
-                    detail=f"Error: {error_text}",
+                    detail=f"Error after {max_attempts} attempts: {last_error}",
                 )
 
             # --- Step 5: Poll Resend for the magic link email ---
