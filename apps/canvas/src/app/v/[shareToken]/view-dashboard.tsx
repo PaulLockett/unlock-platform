@@ -2,13 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { ArrowLeft, Pencil, Loader2 } from "lucide-react";
+import { ArrowLeft, Share2, MessageCircle, Pencil, Loader2 } from "lucide-react";
 import SideNav from "@/components/nav/side-nav";
 import PanelGrid from "@/components/dashboard/panel-grid";
 import EditToolbar from "@/components/dashboard/edit-toolbar";
 import PanelEditor from "@/components/dashboard/panel-editor";
+import ShareDialog from "@/components/views/share-dialog";
+import ChatPanel from "@/components/chat/chat-panel";
 import type {
   ViewDefinition,
+  SchemaDefinition,
+  ViewPermission,
   Panel,
   LayoutConfig,
   ChartType,
@@ -24,6 +28,10 @@ export default function ViewDashboard({
   initialEditMode = false,
 }: ViewDashboardProps) {
   const [view, setView] = useState<ViewDefinition | null>(null);
+  const [_schema, setSchema] = useState<SchemaDefinition | null>(null);
+  const [permissions, setPermissions] = useState<ViewPermission[]>([]);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editMode, setEditMode] = useState(initialEditMode);
@@ -56,6 +64,8 @@ export default function ViewDashboard({
       }
 
       setView(data.view);
+      setSchema(data.schema_def);
+      setPermissions(data.permissions ?? []);
     } catch {
       setError("Failed to load view");
     } finally {
@@ -271,13 +281,29 @@ export default function ViewDashboard({
                 </button>
               </>
             ) : (
-              <button
-                onClick={() => setEditMode(true)}
-                className="flex items-center gap-2 text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
-              >
-                <Pencil className="w-3 h-3" />
-                Edit
-              </button>
+              <>
+                <button
+                  onClick={() => setShareDialogOpen(true)}
+                  className="flex items-center gap-2 text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
+                >
+                  <Share2 className="w-3 h-3" />
+                  Share
+                </button>
+                <button
+                  onClick={() => setChatOpen(!chatOpen)}
+                  className="flex items-center gap-2 text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
+                >
+                  <MessageCircle className="w-3 h-3" />
+                  Comments
+                </button>
+                <button
+                  onClick={() => setEditMode(true)}
+                  className="flex items-center gap-2 text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
+                >
+                  <Pencil className="w-3 h-3" />
+                  Edit
+                </button>
+              </>
             )}
           </div>
         </header>
@@ -363,6 +389,25 @@ export default function ViewDashboard({
         {/* Floating toolbar (edit mode only) */}
         {editMode && <EditToolbar onAddPanel={handleAddPanel} />}
       </main>
+
+      {/* Share dialog */}
+      <ShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        shareToken={shareToken}
+        viewId={view.id}
+        permissions={permissions}
+        visibility={view.visibility ?? "public"}
+        createdBy={view.created_by ?? ""}
+      />
+
+      {/* Chat panel */}
+      <ChatPanel
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        viewName={view.name}
+        currentUserEmail=""
+      />
 
       {/* Panel editor overlay */}
       {editingPanelId && (() => {
