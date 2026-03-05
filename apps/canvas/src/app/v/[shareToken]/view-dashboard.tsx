@@ -6,6 +6,7 @@ import { ArrowLeft, Pencil, Loader2 } from "lucide-react";
 import SideNav from "@/components/nav/side-nav";
 import PanelGrid from "@/components/dashboard/panel-grid";
 import EditToolbar from "@/components/dashboard/edit-toolbar";
+import PanelEditor from "@/components/dashboard/panel-editor";
 import type {
   ViewDefinition,
   Panel,
@@ -35,6 +36,9 @@ export default function ViewDashboard({
   // Edit mode: working copy of panels
   const [editPanels, setEditPanels] = useState<Panel[]>([]);
   const [dirty, setDirty] = useState(false);
+
+  // Panel editor state
+  const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
 
   // Track original panels for discard
   const originalPanelsRef = useRef<Panel[]>([]);
@@ -154,8 +158,16 @@ export default function ViewDashboard({
     setDirty(true);
   }, []);
 
-  const handleEditPanel = useCallback((_panelId: string) => {
-    // Panel editor will be added in Phase 5
+  const handleEditPanel = useCallback((panelId: string) => {
+    setEditingPanelId(panelId);
+  }, []);
+
+  const handleApplyPanelEdit = useCallback((updated: Panel) => {
+    setEditPanels((prev) =>
+      prev.map((p) => (p.id === updated.id ? updated : p)),
+    );
+    setEditingPanelId(null);
+    setDirty(true);
   }, []);
 
   const handleDiscard = useCallback(() => {
@@ -351,6 +363,20 @@ export default function ViewDashboard({
         {/* Floating toolbar (edit mode only) */}
         {editMode && <EditToolbar onAddPanel={handleAddPanel} />}
       </main>
+
+      {/* Panel editor overlay */}
+      {editingPanelId && (() => {
+        const editingPanel = editPanels.find((p) => p.id === editingPanelId);
+        if (!editingPanel) return null;
+        return (
+          <PanelEditor
+            panel={editingPanel}
+            data={panelData[editingPanelId] ?? []}
+            onApply={handleApplyPanelEdit}
+            onCancel={() => setEditingPanelId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
