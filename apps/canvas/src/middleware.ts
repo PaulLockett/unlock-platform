@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -30,9 +30,13 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Redirect unauthenticated users to /login (except for /login and /auth/*).
   const path = request.nextUrl.pathname;
-  const isPublic = path === "/login" || path.startsWith("/auth/");
+
+  // Public routes: login, auth callbacks, and shared view pages
+  const isPublic =
+    path === "/login" ||
+    path.startsWith("/auth/") ||
+    path.startsWith("/v/");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

@@ -94,9 +94,10 @@ class ViewDefinition(BaseModel):
     description: str | None = None
     schema_id: str = ""
     status: str = "draft"  # draft, active, archived
+    visibility: str = "public"  # public, restricted
     share_token: str | None = None
     filters: dict[str, str | int | float | bool | None] = {}
-    layout_config: dict[str, str | int | float | bool | None] = {}
+    layout_config: dict[str, Any] = {}
     cloned_from: str | None = None  # parent view ID for lineage
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -161,8 +162,9 @@ class ActivateViewRequest(BaseModel):
     name: str
     description: str | None = None
     schema_id: str
+    visibility: str = "public"  # public, restricted
     filters: dict[str, str | int | float | bool | None] = {}
-    layout_config: dict[str, str | int | float | bool | None] = {}
+    layout_config: dict[str, Any] = {}
     created_by: str | None = None
 
 
@@ -250,6 +252,7 @@ class SurveyConfigsRequest(BaseModel):
     config_type: str  # schema, pipeline, view
     status: str | None = None
     name_pattern: str | None = None
+    created_by: str | None = None  # filter views by creator
     limit: int = 100
     offset: int = 0
 
