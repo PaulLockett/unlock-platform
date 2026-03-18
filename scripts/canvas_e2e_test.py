@@ -241,19 +241,52 @@ def run_test() -> dict:
                 detail=page.url,
             )
 
-            # Submit magic link
-            email_input = page.locator('input[type="email"]')
-            email_input.fill(test_email)
-            page.locator('button[type="submit"]').click()
+            # Submit magic link with retry (Supabase rate-limits)
+            login_url = f"{VERCEL_PREVIEW_URL}/login"
+            max_attempts = 3
+            magic_link_sent = False
+            last_error = ""
+            for attempt in range(1, max_attempts + 1):
+                email_input = page.locator('input[type="email"]')
+                email_input.fill(test_email)
+                page.locator('button[type="submit"]').click()
+                try:
+                    page.wait_for_selector(
+                        "text=Check your email", timeout=10_000
+                    )
+                    magic_link_sent = True
+                    break
+                except _StepFailure:
+                    raise
+                except Exception as exc:
+                    error_el = page.locator(
+                        "p.text-red-600, p.text-red-400"
+                    )
+                    last_error = (
+                        error_el.text_content()
+                        if error_el.count() > 0
+                        else str(exc)
+                    )
+                    if attempt < max_attempts:
+                        wait = 10 * attempt
+                        print(
+                            f"    Attempt {attempt}/{max_attempts} "
+                            f"failed: {last_error}"
+                        )
+                        print(f"    Retrying in {wait}s...")
+                        page.wait_for_timeout(wait * 1000)
+                        page.goto(login_url, wait_until="networkidle")
 
-            try:
-                page.wait_for_selector("text=Check your email", timeout=10_000)
+            if magic_link_sent:
                 step("Submitted magic link request", detail=test_email)
-            except Exception as exc:
+            else:
                 step(
                     "Submitted magic link request",
                     passed=False,
-                    detail=str(exc),
+                    detail=(
+                        f"Error after {max_attempts} attempts: "
+                        f"{last_error}"
+                    ),
                 )
 
             # Poll for email
