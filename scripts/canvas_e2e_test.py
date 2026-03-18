@@ -323,14 +323,18 @@ def run_test() -> dict:
                 async () => {
                     const controller = new AbortController();
                     const timeout = setTimeout(
-                        () => controller.abort(), 10000
+                        () => controller.abort(), 15000
                     );
                     try {
                         const res = await fetch('/api/admin/sources', {
                             signal: controller.signal
                         });
                         clearTimeout(timeout);
-                        return { status: res.status };
+                        const body = await res.json().catch(() => ({}));
+                        return {
+                            status: res.status,
+                            body: JSON.stringify(body).substring(0, 300)
+                        };
                     } catch (e) {
                         clearTimeout(timeout);
                         return { status: 0, error: e.message };
@@ -342,12 +346,14 @@ def run_test() -> dict:
             # 500 = admin OK but Temporal down
             # 403 = not admin
             temporal_ok = admin_probe["status"] == 200
+            probe_body = admin_probe.get("body", admin_probe.get("error", ""))
             step(
                 "Checked infrastructure readiness",
                 detail=(
                     f"is_admin={is_admin}, "
                     f"temporal_ok={temporal_ok} "
-                    f"(status={admin_probe.get('status')})"
+                    f"(status={admin_probe.get('status')}) "
+                    f"body={probe_body}"
                 ),
             )
 
