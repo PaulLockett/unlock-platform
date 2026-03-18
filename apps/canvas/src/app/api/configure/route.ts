@@ -3,6 +3,8 @@ import { z } from "zod";
 import { requireAuth, requireAdmin, AuthError } from "@/lib/auth/session";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
+export const maxDuration = 30;
+
 const ConfigureBody = z.object({
   config_type: z.enum(["schema", "pipeline", "view"]),
   name: z.string().min(1),

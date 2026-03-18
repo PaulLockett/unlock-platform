@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getSessionUser, requireAuth, AuthError } from "@/lib/auth/session";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
+export const maxDuration = 30;
+
 /**
  * GET /api/views/[shareToken] — get view config + schema + permissions.
  * Auth optional: public views are accessible without login.

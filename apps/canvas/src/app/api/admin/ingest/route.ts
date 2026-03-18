@@ -3,6 +3,8 @@ import { z } from "zod";
 import { requireAdmin, AuthError } from "@/lib/auth/session";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
+export const maxDuration = 30;
+
 const IngestBody = z.object({
   source_name: z.string().min(1),
   source_type: z.string().min(1),

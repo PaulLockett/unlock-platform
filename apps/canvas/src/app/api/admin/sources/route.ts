@@ -3,6 +3,8 @@ import { z } from "zod";
 import { requireAdmin, AuthError } from "@/lib/auth/session";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
+export const maxDuration = 30;
+
 /**
  * GET /api/admin/sources — list registered data sources.
  * Admin only. Routes through ManageSourceWorkflow → identify_source activity.

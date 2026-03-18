@@ -3,6 +3,8 @@ import { z } from "zod";
 import { requireAuth, AuthError } from "@/lib/auth/session";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
+export const maxDuration = 30;
+
 const ShareBody = z.object({
   share_token: z.string(),
   recipient_id: z.string(),

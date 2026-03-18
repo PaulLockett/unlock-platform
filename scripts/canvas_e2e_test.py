@@ -323,7 +323,7 @@ def run_test() -> dict:
                 async () => {
                     const controller = new AbortController();
                     const timeout = setTimeout(
-                        () => controller.abort(), 15000
+                        () => controller.abort(), 30000
                     );
                     try {
                         const res = await fetch('/api/admin/sources', {
