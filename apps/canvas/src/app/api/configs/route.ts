@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireAdmin, AuthError } from "@/lib/auth/session";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 /**
  * GET /api/configs — list schemas or pipelines.

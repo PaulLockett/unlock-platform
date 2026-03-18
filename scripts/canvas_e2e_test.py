@@ -70,7 +70,7 @@ CSV_FIXTURE = FIXTURE_DIR / "meta_ads_test_data.csv"
 # Polling config
 EMAIL_POLL_INTERVAL = 3
 EMAIL_POLL_TIMEOUT = 120
-PAGE_LOAD_TIMEOUT = 20_000
+PAGE_LOAD_TIMEOUT = 60_000
 
 
 class _StepFailure(Exception):
@@ -323,7 +323,7 @@ def run_test() -> dict:
                 async () => {
                     const controller = new AbortController();
                     const timeout = setTimeout(
-                        () => controller.abort(), 30000
+                        () => controller.abort(), 55000
                     );
                     try {
                         const res = await fetch('/api/admin/sources', {

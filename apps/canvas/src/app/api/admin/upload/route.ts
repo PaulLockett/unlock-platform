@@ -3,7 +3,7 @@ import { requireAdmin, AuthError } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 /**
  * POST /api/admin/upload — upload a file (CSV/JSON) and trigger ingestion.
