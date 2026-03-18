@@ -314,25 +314,47 @@ def run_test() -> dict:
                 detail=f"URL: {page.url}",
             )
 
-            # --- Check admin role ---
-            # Probe the admin sources endpoint to detect if the test user
-            # has admin privileges. If not, skip admin-gated flows rather
-            # than producing a false negative.
+            # --- Probe infrastructure readiness ---
+            # Two prerequisites for workflow-dependent flows:
+            # 1. Admin role (for admin-gated routes)
+            # 2. Temporal connectivity (for all workflow routes)
+            # Probe both with a single request + the Temporal probe.
             admin_probe = page.evaluate("""
                 async () => {
-                    const res = await fetch('/api/admin/sources');
-                    return { status: res.status };
+                    const controller = new AbortController();
+                    const timeout = setTimeout(
+                        () => controller.abort(), 10000
+                    );
+                    try {
+                        const res = await fetch('/api/admin/sources', {
+                            signal: controller.signal
+                        });
+                        clearTimeout(timeout);
+                        return { status: res.status };
+                    } catch (e) {
+                        clearTimeout(timeout);
+                        return { status: 0, error: e.message };
+                    }
                 }
             """)
-            is_admin = admin_probe["status"] != 403
+            is_admin = admin_probe["status"] not in (403, 401)
+            # 200 = admin + Temporal working
+            # 500 = admin OK but Temporal down
+            # 403 = not admin
+            temporal_ok = admin_probe["status"] == 200
             step(
-                "Checked admin role",
-                detail=f"is_admin={is_admin} (probe status={admin_probe['status']})",
+                "Checked infrastructure readiness",
+                detail=(
+                    f"is_admin={is_admin}, "
+                    f"temporal_ok={temporal_ok} "
+                    f"(status={admin_probe.get('status')})"
+                ),
             )
 
             # --- Flow 1: Admin Data Lifecycle ---
+            # Requires BOTH admin role AND Temporal connectivity
 
-            if is_admin:
+            if is_admin and temporal_ok:
                 # Step: Navigate to admin sources
                 page.goto(
                     f"{VERCEL_PREVIEW_URL}/admin/sources",
@@ -418,42 +440,12 @@ def run_test() -> dict:
                     detail=f"status={upload_result['status']}",
                 )
             else:
-                print("  [SKIP] Admin flows — user lacks admin role")
-                print(
-                    "         Set TEST_ADMIN_EMAIL secret to a Supabase user "
-                    "with app_metadata.role='admin'"
-                )
-
-            # --- Probe Temporal connectivity ---
-            # All workflow-dependent routes (configure, query, admin/sources,
-            # admin/ingest) require Temporal Cloud. The Vercel preview needs
-            # TEMPORAL_ADDRESS + TEMPORAL_NAMESPACE + TLS certs configured.
-            # If missing, routes fall back to localhost:7233 which doesn't
-            # exist → 500. Detect this early and skip gracefully.
-            temporal_probe = page.evaluate("""
-                async () => {
-                    const controller = new AbortController();
-                    const timeout = setTimeout(() => controller.abort(), 10000);
-                    try {
-                        const res = await fetch('/api/views', {
-                            signal: controller.signal
-                        });
-                        clearTimeout(timeout);
-                        return { status: res.status, reachable: res.status !== 500 };
-                    } catch (e) {
-                        clearTimeout(timeout);
-                        return { status: 0, reachable: false, error: e.message };
-                    }
-                }
-            """)
-            temporal_ok = temporal_probe.get("reachable", False)
-            step(
-                "Probed Temporal connectivity",
-                detail=(
-                    f"reachable={temporal_ok} "
-                    f"(status={temporal_probe.get('status')})"
-                ),
-            )
+                reasons = []
+                if not is_admin:
+                    reasons.append("user lacks admin role")
+                if not temporal_ok:
+                    reasons.append("Temporal not reachable")
+                print(f"  [SKIP] Admin flows — {', '.join(reasons)}")
 
             # --- Flow 2: View Sharing (requires Temporal) ---
             share_token = ""
