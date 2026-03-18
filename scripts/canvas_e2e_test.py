@@ -396,10 +396,11 @@ def run_test() -> dict:
                         in str(api_result.get("body", {})).lower()
                     )
                 )
+                post_body = str(api_result.get("body", {}))[:200]
                 step(
                     "Created source via API",
                     passed=source_created,
-                    detail=f"status={api_result['status']}",
+                    detail=f"status={api_result['status']} body={post_body}",
                 )
 
                 # Step: List sources via API
