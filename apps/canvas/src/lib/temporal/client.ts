@@ -5,19 +5,32 @@ let _client: Client | null = null;
 /**
  * Singleton Temporal client. Reuses the connection across API route calls.
  *
- * Connects to Temporal Cloud if TEMPORAL_ADDRESS + TEMPORAL_NAMESPACE are set,
- * otherwise falls back to local dev server at localhost:7233.
+ * Three connection modes (checked in order):
+ * 1. API key auth: TEMPORAL_API_KEY + TEMPORAL_REGIONAL_ENDPOINT (Temporal Cloud)
+ * 2. mTLS auth: TEMPORAL_TLS_CERT + TEMPORAL_TLS_KEY (Temporal Cloud, legacy)
+ * 3. Local dev: localhost:7233, no auth
  */
 export async function getTemporalClient(): Promise<Client> {
   if (_client) return _client;
 
-  const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
   const namespace = process.env.TEMPORAL_NAMESPACE ?? "default";
 
   let connection: Connection;
 
-  if (process.env.TEMPORAL_TLS_CERT && process.env.TEMPORAL_TLS_KEY) {
-    // Temporal Cloud: mTLS authentication
+  if (process.env.TEMPORAL_API_KEY) {
+    // Temporal Cloud: API key authentication
+    const address =
+      process.env.TEMPORAL_REGIONAL_ENDPOINT ??
+      process.env.TEMPORAL_ADDRESS ??
+      "localhost:7233";
+    connection = await Connection.connect({
+      address,
+      apiKey: process.env.TEMPORAL_API_KEY,
+      tls: true,
+    });
+  } else if (process.env.TEMPORAL_TLS_CERT && process.env.TEMPORAL_TLS_KEY) {
+    // Temporal Cloud: mTLS authentication (legacy)
+    const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
     connection = await Connection.connect({
       address,
       tls: {
@@ -29,6 +42,7 @@ export async function getTemporalClient(): Promise<Client> {
     });
   } else {
     // Local dev: no TLS
+    const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
     connection = await Connection.connect({ address });
   }
 
