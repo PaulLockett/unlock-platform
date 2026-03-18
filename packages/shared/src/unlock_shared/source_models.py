@@ -14,6 +14,7 @@ Design choices:
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -85,7 +86,7 @@ class SourceRecord(BaseModel):
     auth_env_var: str = ""
     resource_type: str = "posts"
     channel_key: str = ""
-    config: dict[str, str | int | float | bool | None] = {}
+    config: dict[str, Any] = {}
     status: str = "active"
     created_at: str = ""
 
@@ -100,9 +101,9 @@ class IdentifySourceRequest(BaseModel):
 class IdentifySourceResult(PlatformResult):
     """Result of source identification — exact match, fuzzy matches, or full list."""
 
-    exact_match: dict[str, str | int | float | bool | None] | None = None
-    possible_matches: list[dict[str, str | int | float | bool | None]] = []
-    all_sources: list[dict[str, str | int | float | bool | None]] | None = None
+    exact_match: dict[str, Any] | None = None
+    possible_matches: list[dict[str, Any]] = []
+    all_sources: list[dict[str, Any]] | None = None
 
 
 class RegisterSourceRequest(BaseModel):
@@ -116,10 +117,10 @@ class RegisterSourceRequest(BaseModel):
     auth_env_var: str = ""
     resource_type: str = "posts"
     channel_key: str = ""
-    config: dict[str, str | int | float | bool | None] = {}
+    config: dict[str, Any] = {}
 
 
 class RegisterSourceResult(PlatformResult):
     """Result of source registration."""
 
-    source: dict[str, str | int | float | bool | None] = {}
+    source: dict[str, Any] = {}
