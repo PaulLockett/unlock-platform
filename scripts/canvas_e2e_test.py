@@ -83,17 +83,30 @@ class _StepFailure(Exception):
 
 
 def create_browserbase_session() -> dict:
-    resp = httpx.post(
-        "https://api.browserbase.com/v1/sessions",
-        headers={
-            "X-BB-API-Key": BROWSERBASE_API_KEY,
-            "Content-Type": "application/json",
-        },
-        json={"projectId": BROWSERBASE_PROJECT_ID},
-        timeout=30,
-    )
+    """Create a Browserbase session with retry on 429 rate limits.
+
+    The auth E2E and canvas E2E workflows run in parallel on the same PR,
+    so they can hit the Browserbase concurrency/rate limit simultaneously.
+    """
+    for attempt in range(5):
+        resp = httpx.post(
+            "https://api.browserbase.com/v1/sessions",
+            headers={
+                "X-BB-API-Key": BROWSERBASE_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={"projectId": BROWSERBASE_PROJECT_ID},
+            timeout=30,
+        )
+        if resp.status_code == 429:
+            wait = 5 * (attempt + 1)  # 5, 10, 15, 20, 25 seconds
+            print(f"  Browserbase rate limited (429), retrying in {wait}s...")
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp.json()
     resp.raise_for_status()
-    return resp.json()
+    return resp.json()  # unreachable but satisfies type checkers
 
 
 def poll_resend_for_email(
