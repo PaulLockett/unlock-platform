@@ -116,7 +116,13 @@ class ComponentConfig:
 COMPONENTS: dict[str, ComponentConfig] = {
     "data-manager": ComponentConfig(
         task_queue=DATA_MANAGER_QUEUE,
-        workflows=[IngestWorkflow, QueryWorkflow, ConfigureWorkflow, ShareWorkflow, ManageSourceWorkflow],
+        workflows=[
+            IngestWorkflow,
+            QueryWorkflow,
+            ConfigureWorkflow,
+            ShareWorkflow,
+            ManageSourceWorkflow,
+        ],
     ),
     "source-access": ComponentConfig(
         task_queue=SOURCE_ACCESS_QUEUE,

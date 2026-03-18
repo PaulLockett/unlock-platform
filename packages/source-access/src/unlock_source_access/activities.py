@@ -198,7 +198,11 @@ async def identify_source(request: IdentifySourceRequest) -> IdentifySourceResul
 
         return IdentifySourceResult(
             success=True,
-            message="exact match found" if exact_match else f"{len(possible_matches)} possible matches",
+            message=(
+                "exact match found"
+                if exact_match
+                else f"{len(possible_matches)} possible matches"
+            ),
             exact_match=exact_match,
             possible_matches=possible_matches,
         )

@@ -17,9 +17,7 @@ from temporalio import workflow
 with workflow.unsafe.imports_passed_through():
     from unlock_shared.source_models import (
         IdentifySourceRequest,
-        IdentifySourceResult,
         RegisterSourceRequest,
-        RegisterSourceResult,
     )
     from unlock_shared.task_queues import SOURCE_ACCESS_QUEUE
     from unlock_source_access.activities import identify_source, register_source
