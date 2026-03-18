@@ -1,30 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin, AuthError } from "@/lib/auth/session";
-import { createClient } from "@/lib/supabase/server";
+import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
 /**
  * GET /api/admin/sources — list registered data sources.
- * Admin only. Reads from Supabase directly (source registry).
+ * Admin only. Routes through ManageSourceWorkflow → identify_source activity.
  */
 export async function GET() {
   try {
     await requireAdmin();
-    const supabase = await createClient();
 
-    const { data, error } = await supabase
-      .from("data_sources")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const client = await getTemporalClient();
+    const result = await client.workflow.execute("ManageSourceWorkflow", {
+      taskQueue: TASK_QUEUES.DATA_MANAGER,
+      workflowId: `identify-sources-${Date.now()}`,
+      args: [{ action: "identify" }],
+    });
 
-    if (error) {
-      return NextResponse.json(
-        { success: false, message: error.message },
-        { status: 500 },
-      );
+    if (!result.success) {
+      return NextResponse.json(result, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, sources: data ?? [] });
+    return NextResponse.json({
+      success: true,
+      sources: result.all_sources ?? [],
+    });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json(
@@ -61,7 +62,7 @@ const CreateSourceBody = z.object({
 
 /**
  * POST /api/admin/sources — register a new data source.
- * Admin only.
+ * Admin only. Routes through ManageSourceWorkflow → register_source activity.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -75,24 +76,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("data_sources")
-      .insert({
-        ...parsed.data,
-        status: "active",
-      })
-      .select()
-      .single();
+    const client = await getTemporalClient();
+    const result = await client.workflow.execute("ManageSourceWorkflow", {
+      taskQueue: TASK_QUEUES.DATA_MANAGER,
+      workflowId: `register-source-${parsed.data.name}-${Date.now()}`,
+      args: [
+        {
+          action: "register",
+          ...parsed.data,
+        },
+      ],
+    });
 
-    if (error) {
-      return NextResponse.json(
-        { success: false, message: error.message },
-        { status: 500 },
-      );
+    if (!result.success) {
+      return NextResponse.json(result, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, source: data }, { status: 201 });
+    return NextResponse.json(
+      { success: true, source: result.source },
+      { status: 201 },
+    );
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json(
