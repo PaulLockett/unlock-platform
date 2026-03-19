@@ -385,7 +385,10 @@ def run_test() -> dict:
                                 resource_type: 'ads_metrics'
                             })
                         });
-                        return { status: res.status, body: await res.json() };
+                        const body = await res.json().catch(
+                            () => ({ error: 'non-JSON response' })
+                        );
+                        return { status: res.status, body };
                     }
                 """)
                 source_created = (
@@ -407,7 +410,8 @@ def run_test() -> dict:
                 list_result = page.evaluate("""
                     async () => {
                         const res = await fetch('/api/admin/sources');
-                        return { status: res.status, body: await res.json() };
+                        const b = await res.json().catch(() => ({ error: 'non-JSON' }));
+                        return { status: res.status, body: b };
                     }
                 """)
                 step(
@@ -436,7 +440,8 @@ def run_test() -> dict:
                             method: 'POST',
                             body: formData
                         });
-                        return { status: res.status, body: await res.json() };
+                        const b = await res.json().catch(() => ({ error: 'non-JSON' }));
+                        return { status: res.status, body: b };
                     }
                 """,
                     csv_content,
@@ -470,7 +475,8 @@ def run_test() -> dict:
                                 layout_config: { panels: [] }
                             })
                         });
-                        return { status: res.status, body: await res.json() };
+                        const b = await res.json().catch(() => ({ error: 'non-JSON' }));
+                        return { status: res.status, body: b };
                     }
                 """)
                 view_created = view_result["status"] == 201
@@ -495,7 +501,7 @@ def run_test() -> dict:
                             );
                             return {
                                 status: res.status,
-                                body: await res.json()
+                                body: await res.json().catch(() => ({ error: 'non-JSON' }))
                             };
                         }
                     """,
@@ -524,7 +530,7 @@ def run_test() -> dict:
                             });
                             return {
                                 status: res.status,
-                                body: await res.json()
+                                body: await res.json().catch(() => ({ error: 'non-JSON' }))
                             };
                         }
                     """,
