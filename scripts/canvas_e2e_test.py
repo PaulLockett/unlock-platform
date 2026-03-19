@@ -483,12 +483,14 @@ def run_test() -> dict:
                 share_token = (
                     view_result.get("body", {}).get("share_token", "")
                 )
+                view_body = str(view_result.get("body", {}))[:200]
                 step(
                     "Created view via API",
                     passed=view_created,
                     detail=(
                         f"status={view_result['status']}, "
-                        f"share_token={share_token}"
+                        f"share_token={share_token} "
+                        f"body={view_body}"
                     ),
                 )
 
