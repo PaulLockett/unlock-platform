@@ -346,11 +346,21 @@ def run_test() -> dict:
             # 500 = admin OK but Temporal down
             # 403 = not admin
             temporal_ok = admin_probe["status"] == 200
-            probe_body = admin_probe.get("body", admin_probe.get("error", ""))
+            probe_body = admin_probe.get(
+                "body", admin_probe.get("error", "")
+            )
             step(
-                "Checked infrastructure readiness",
+                "Checked admin role",
+                passed=is_admin,
                 detail=(
-                    f"is_admin={is_admin}, "
+                    f"is_admin={is_admin} "
+                    f"(status={admin_probe.get('status')})"
+                ),
+            )
+            step(
+                "Checked Temporal connectivity",
+                passed=temporal_ok,
+                detail=(
                     f"temporal_ok={temporal_ok} "
                     f"(status={admin_probe.get('status')}) "
                     f"body={probe_body}"
@@ -358,200 +368,195 @@ def run_test() -> dict:
             )
 
             # --- Flow 1: Admin Data Lifecycle ---
-            # Requires BOTH admin role AND Temporal connectivity
 
-            if is_admin and temporal_ok:
-                # Admin API tests — these call the API routes directly
-                # via fetch(), no admin UI pages needed.
+            # Step: Create source via API
+            api_result = page.evaluate("""
+                async () => {
+                    const res = await fetch('/api/admin/sources', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: 'Meta Ads E2E Test',
+                            protocol: 'file_upload',
+                            service: 'meta',
+                            resource_type: 'ads_metrics'
+                        })
+                    });
+                    const body = await res.json().catch(
+                        () => ({ error: 'non-JSON response' })
+                    );
+                    return { status: res.status, body };
+                }
+            """)
+            source_created = (
+                api_result["status"] == 201
+                or (
+                    api_result["status"] == 500
+                    and "duplicate"
+                    in str(api_result.get("body", {})).lower()
+                )
+            )
+            post_body = str(api_result.get("body", {}))[:200]
+            step(
+                "Created source via API",
+                passed=source_created,
+                detail=(
+                    f"status={api_result['status']} "
+                    f"body={post_body}"
+                ),
+            )
 
-                # Step: Create source via API
-                api_result = page.evaluate("""
-                    async () => {
-                        const res = await fetch('/api/admin/sources', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                name: 'Meta Ads E2E Test',
-                                protocol: 'file_upload',
-                                service: 'meta',
-                                resource_type: 'ads_metrics'
-                            })
-                        });
-                        const body = await res.json().catch(
-                            () => ({ error: 'non-JSON response' })
-                        );
-                        return { status: res.status, body };
-                    }
-                """)
-                source_created = (
-                    api_result["status"] == 201
-                    or (
-                        api_result["status"] == 500
-                        and "duplicate"
-                        in str(api_result.get("body", {})).lower()
+            # Step: List sources via API
+            list_result = page.evaluate("""
+                async () => {
+                    const res = await fetch('/api/admin/sources');
+                    const b = await res.json().catch(
+                        () => ({ error: 'non-JSON' })
+                    );
+                    return { status: res.status, body: b };
+                }
+            """)
+            step(
+                "Listed sources via API",
+                passed=list_result["status"] == 200,
+                detail=(
+                    f"count="
+                    f"{len(list_result.get('body', {}).get('sources', []))}"
+                ),
+            )
+
+            # Step: Upload CSV via API
+            csv_content = CSV_FIXTURE.read_text()
+            upload_result = page.evaluate(
+                """
+                async (csvContent) => {
+                    const blob = new Blob([csvContent], {
+                        type: 'text/csv'
+                    });
+                    const file = new File(
+                        [blob], 'meta_ads_test_data.csv',
+                        { type: 'text/csv' }
+                    );
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('source_name', 'Meta Ads E2E Test');
+                    formData.append('resource_type', 'ads_metrics');
+                    const res = await fetch('/api/admin/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const b = await res.json().catch(
+                        () => ({ error: 'non-JSON' })
+                    );
+                    return { status: res.status, body: b };
+                }
+            """,
+                csv_content,
+            )
+            step(
+                "Uploaded CSV via API",
+                passed=upload_result["status"] == 200,
+                detail=f"status={upload_result['status']}",
+            )
+
+            # --- Flow 2: View Sharing ---
+            share_token = ""
+            view_result = page.evaluate("""
+                async () => {
+                    const res = await fetch('/api/configure', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            config_type: 'view',
+                            name: 'E2E Test View',
+                            description: 'Created by Canvas E2E test',
+                            visibility: 'public',
+                            layout_config: { panels: [] }
+                        })
+                    });
+                    const b = await res.json().catch(
+                        () => ({ error: 'non-JSON' })
+                    );
+                    return { status: res.status, body: b };
+                }
+            """)
+            # View creation requires an existing schema_id. If the
+            # workflow rejects with "Schema not found", that's valid —
+            # the workflow executed and validated its inputs.
+            view_created = view_result["status"] == 201
+            view_body_str = str(view_result.get("body", {}))
+            schema_missing = "Schema not found" in view_body_str
+            share_token = (
+                view_result.get("body", {}).get("share_token", "")
+            )
+            view_body = str(view_result.get("body", {}))[:200]
+            step(
+                "Created view via API",
+                passed=view_created or schema_missing,
+                detail=(
+                    f"status={view_result['status']}, "
+                    f"share_token={share_token} "
+                    f"body={view_body}"
+                    + (
+                        " (schema_missing=OK)"
+                        if schema_missing
+                        else ""
                     )
-                )
-                post_body = str(api_result.get("body", {}))[:200]
-                step(
-                    "Created source via API",
-                    passed=source_created,
-                    detail=f"status={api_result['status']} body={post_body}",
-                )
+                ),
+            )
 
-                # Step: List sources via API
-                list_result = page.evaluate("""
-                    async () => {
-                        const res = await fetch('/api/admin/sources');
-                        const b = await res.json().catch(() => ({ error: 'non-JSON' }));
-                        return { status: res.status, body: b };
-                    }
-                """)
-                step(
-                    "Listed sources via API",
-                    passed=list_result["status"] == 200,
-                    detail=(
-                        f"count="
-                        f"{len(list_result.get('body', {}).get('sources', []))}"
-                    ),
-                )
-
-                # Step: Upload CSV via API
-                csv_content = CSV_FIXTURE.read_text()
-                upload_result = page.evaluate(
+            if share_token:
+                public_view_result = page.evaluate(
                     """
-                    async (csvContent) => {
-                        const blob = new Blob([csvContent], { type: 'text/csv' });
-                        const file = new File([blob], 'meta_ads_test_data.csv', {
-                            type: 'text/csv'
-                        });
-                        const formData = new FormData();
-                        formData.append('file', file);
-                        formData.append('source_name', 'Meta Ads E2E Test');
-                        formData.append('resource_type', 'ads_metrics');
-                        const res = await fetch('/api/admin/upload', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        const b = await res.json().catch(() => ({ error: 'non-JSON' }));
-                        return { status: res.status, body: b };
+                    async (shareToken) => {
+                        const res = await fetch(
+                            `/api/views/${shareToken}`
+                        );
+                        return {
+                            status: res.status,
+                            body: await res.json().catch(
+                                () => ({ error: 'non-JSON' })
+                            )
+                        };
                     }
                 """,
-                    csv_content,
+                    share_token,
                 )
                 step(
-                    "Uploaded CSV via API",
-                    passed=upload_result["status"] == 200,
-                    detail=f"status={upload_result['status']}",
+                    "Accessed public view",
+                    passed=public_view_result["status"] == 200,
+                    detail=f"status={public_view_result['status']}",
                 )
-            else:
-                reasons = []
-                if not is_admin:
-                    reasons.append("user lacks admin role")
-                if not temporal_ok:
-                    reasons.append("Temporal not reachable")
-                print(f"  [SKIP] Admin flows — {', '.join(reasons)}")
 
-            # --- Flow 2: View Sharing (requires Temporal) ---
-            share_token = ""
-            if temporal_ok:
-                view_result = page.evaluate("""
-                    async () => {
-                        const res = await fetch('/api/configure', {
+            # --- Flow 3: Query Validation ---
+            if share_token:
+                query_result = page.evaluate(
+                    """
+                    async (shareToken) => {
+                        const res = await fetch('/api/query', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
                             body: JSON.stringify({
-                                config_type: 'view',
-                                name: 'E2E Test View',
-                                description: 'Created by Canvas E2E test',
-                                visibility: 'public',
-                                layout_config: { panels: [] }
+                                share_token: shareToken,
+                                limit: 10
                             })
                         });
-                        const b = await res.json().catch(() => ({ error: 'non-JSON' }));
-                        return { status: res.status, body: b };
+                        return {
+                            status: res.status,
+                            body: await res.json().catch(
+                                () => ({ error: 'non-JSON' })
+                            )
+                        };
                     }
-                """)
-                # View creation requires an existing schema_id. If the
-                # workflow rejects with "Schema not found", that's a valid
-                # config error, not a test failure — it means the workflow
-                # executed correctly and validated its inputs.
-                view_created = view_result["status"] == 201
-                view_body_str = str(view_result.get("body", {}))
-                schema_missing = "Schema not found" in view_body_str
-                share_token = (
-                    view_result.get("body", {}).get("share_token", "")
+                """,
+                    share_token,
                 )
-                view_body = str(view_result.get("body", {}))[:200]
                 step(
-                    "Created view via API",
-                    passed=view_created or schema_missing,
-                    detail=(
-                        f"status={view_result['status']}, "
-                        f"share_token={share_token} "
-                        f"body={view_body}"
-                        + (" (schema_missing=OK)"
-                           if schema_missing else "")
-                    ),
-                )
-
-                if share_token:
-                    public_view_result = page.evaluate(
-                        """
-                        async (shareToken) => {
-                            const res = await fetch(
-                                `/api/views/${shareToken}`
-                            );
-                            return {
-                                status: res.status,
-                                body: await res.json().catch(() => ({ error: 'non-JSON' }))
-                            };
-                        }
-                    """,
-                        share_token,
-                    )
-                    step(
-                        "Accessed public view",
-                        passed=public_view_result["status"] == 200,
-                        detail=f"status={public_view_result['status']}",
-                    )
-
-                # --- Flow 3: Query Validation ---
-                if share_token:
-                    query_result = page.evaluate(
-                        """
-                        async (shareToken) => {
-                            const res = await fetch('/api/query', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({
-                                    share_token: shareToken,
-                                    limit: 10
-                                })
-                            });
-                            return {
-                                status: res.status,
-                                body: await res.json().catch(() => ({ error: 'non-JSON' }))
-                            };
-                        }
-                    """,
-                        share_token,
-                    )
-                    step(
-                        "Queried view data via API",
-                        passed=query_result["status"] != 400,
-                        detail=f"status={query_result['status']}",
-                    )
-            else:
-                print(
-                    "  [SKIP] Temporal-dependent flows — "
-                    "Temporal not reachable from Vercel preview"
-                )
-                print(
-                    "         Configure TEMPORAL_ADDRESS, "
-                    "TEMPORAL_NAMESPACE, TEMPORAL_TLS_CERT/KEY "
-                    "on Vercel project"
+                    "Queried view data via API",
+                    passed=query_result["status"] != 400,
+                    detail=f"status={query_result['status']}",
                 )
 
             # Screenshot
