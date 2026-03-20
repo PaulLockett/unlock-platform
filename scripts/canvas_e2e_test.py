@@ -361,16 +361,8 @@ def run_test() -> dict:
             # Requires BOTH admin role AND Temporal connectivity
 
             if is_admin and temporal_ok:
-                # Step: Navigate to admin sources
-                page.goto(
-                    f"{VERCEL_PREVIEW_URL}/admin/sources",
-                    wait_until="networkidle",
-                )
-                step(
-                    "Navigated to Admin → Sources",
-                    passed="/admin" in page.url or "/sources" in page.url,
-                    detail=page.url,
-                )
+                # Admin API tests — these call the API routes directly
+                # via fetch(), no admin UI pages needed.
 
                 # Step: Create source via API
                 api_result = page.evaluate("""
