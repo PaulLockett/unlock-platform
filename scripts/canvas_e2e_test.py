@@ -297,11 +297,10 @@ def run_test() -> dict:
             # Extract and navigate to magic link
             html_body = email_data.get("html", "") or email_data.get("text", "")
             magic_link = extract_magic_link(html_body)
-            page.goto(magic_link, wait_until="networkidle")
+            page.goto(magic_link, wait_until="domcontentloaded")
+            # Wait for the redirect chain to land (Supabase → callback → /)
+            page.wait_for_url("**/", timeout=30000)
             step("Navigated to magic link", detail=page.url)
-
-            # Verify logged in
-            page.wait_for_load_state("networkidle")
             body_text = page.text_content("body") or ""
             logged_in = (
                 test_email in body_text

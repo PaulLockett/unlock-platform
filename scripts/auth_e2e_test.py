@@ -302,14 +302,15 @@ def run_test() -> dict:
             step("Extracted magic link URL", detail=magic_link[:80] + "...")
 
             # --- Step 7: Navigate to magic link ---
-            page.goto(magic_link, wait_until="networkidle")
+            page.goto(magic_link, wait_until="domcontentloaded")
+            # Wait for redirect chain to land (not /login)
+            page.wait_for_url("**/", timeout=30000)
             step("Navigated to magic link", detail=page.url)
 
             # --- Step 8: Verify logged-in state ---
             # After the magic link flow, we should land on "/" and see either
             # the test email or a "Sign out" button — proving the session was
             # created.
-            page.wait_for_load_state("networkidle")
             body_text = page.text_content("body") or ""
             logged_in = (
                 test_email in body_text

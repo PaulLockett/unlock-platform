@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import SignOutButton from "./sign-out-button";
+import DashboardClient from "./dashboard-client";
 
-export default async function Home() {
+export default async function DashboardPage() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -12,22 +12,15 @@ export default async function Home() {
     redirect("/login");
   }
 
+  const role = (user.app_metadata?.role as string) ?? "user";
+  const displayRole = role === "admin" ? "System Admin" : "Viewer";
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-col items-center gap-8 text-center">
-        <h1 className="text-4xl font-bold tracking-tight text-black dark:text-zinc-50">
-          Unlock Alabama Data Platform
-        </h1>
-        <p className="max-w-md text-lg text-zinc-600 dark:text-zinc-400">
-          Analytics Canvas — civic data transformation and insights
-        </p>
-        <div className="flex flex-col items-center gap-2">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Signed in as <strong>{user.email}</strong>
-          </p>
-          <SignOutButton />
-        </div>
-      </main>
-    </div>
+    <DashboardClient
+      userId={user.id}
+      userEmail={user.email ?? ""}
+      userRole={displayRole}
+      isAdmin={role === "admin"}
+    />
   );
 }
