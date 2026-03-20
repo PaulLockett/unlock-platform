@@ -303,7 +303,8 @@ def run_test() -> dict:
 
             # --- Step 7: Navigate to magic link ---
             page.goto(magic_link, wait_until="domcontentloaded")
-            page.wait_for_load_state("networkidle", timeout=30000)
+            # Wait for redirect chain to land (not /login)
+            page.wait_for_url("**/", timeout=30000)
             step("Navigated to magic link", detail=page.url)
 
             # --- Step 8: Verify logged-in state ---
