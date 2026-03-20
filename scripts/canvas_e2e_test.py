@@ -634,14 +634,17 @@ def run_test() -> dict:
                     f"{VERCEL_PREVIEW_URL}/v/{share_token}",
                     wait_until="domcontentloaded",
                 )
-                # Wait for the view to load — the page fetches
-                # view config via Temporal which can take 10-20s
+                # Wait for hydration + Temporal workflow to complete.
+                # The view-dashboard.tsx shows a spinner while loading,
+                # then renders the view name. Wait for either the title
+                # or the footer (proves the page fully rendered).
+                page.wait_for_load_state("load", timeout=15000)
                 import contextlib
 
                 with contextlib.suppress(Exception):
                     page.wait_for_selector(
-                        "text=Meta Ads Dashboard",
-                        timeout=45000,
+                        "text=UNLOCK ALABAMA",
+                        timeout=50000,
                     )
 
                 body = page.text_content("body") or ""
