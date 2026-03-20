@@ -634,8 +634,15 @@ def run_test() -> dict:
                     f"{VERCEL_PREVIEW_URL}/v/{share_token}",
                     wait_until="domcontentloaded",
                 )
-                # Wait for the view to load (title appears)
-                page.wait_for_timeout(3000)
+                # Wait for the view to load — the page fetches
+                # view config via Temporal which can take 10-20s
+                import contextlib
+
+                with contextlib.suppress(Exception):
+                    page.wait_for_selector(
+                        "text=Meta Ads Dashboard",
+                        timeout=45000,
+                    )
 
                 body = page.text_content("body") or ""
                 has_view_name = "Meta Ads Dashboard" in body
@@ -648,13 +655,15 @@ def run_test() -> dict:
                     "UNLOCK ALABAMA" in body
                     or "OPERATIONAL" in body
                 )
+                body_preview = body[:200].replace("\n", " ")
                 step(
                     "View dashboard renders",
                     passed=has_view_name or has_panel_grid,
                     detail=(
                         f"view_name={has_view_name} "
                         f"panel_grid={has_panel_grid} "
-                        f"footer={has_footer}"
+                        f"footer={has_footer} "
+                        f"body={body_preview}"
                     ),
                 )
 
