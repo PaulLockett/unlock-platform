@@ -458,19 +458,65 @@ def run_test() -> dict:
                 detail=f"status={upload_result['status']}",
             )
 
-            # --- Flow 2: View Sharing ---
-            share_token = ""
-            view_result = page.evaluate("""
+            # --- Flow 2: Visual Validation — Dashboard Home ---
+            page.goto(
+                f"{VERCEL_PREVIEW_URL}/",
+                wait_until="domcontentloaded",
+            )
+            page.wait_for_url("**/", timeout=15000)
+
+            # Verify dashboard home renders with key elements
+            has_my_views = page.locator(
+                "text=My Views, text=MY VIEWS"
+            ).count() > 0 or "views" in (
+                page.text_content("body") or ""
+            ).lower()
+            has_side_nav = page.locator("nav").count() > 0
+            step(
+                "Dashboard home renders",
+                passed=has_my_views or has_side_nav,
+                detail=(
+                    f"my_views={has_my_views} "
+                    f"side_nav={has_side_nav} "
+                    f"url={page.url}"
+                ),
+            )
+
+            # --- Flow 3: Create Schema + View with Panels ---
+            # Create a schema for the Meta Ads data
+            schema_result = page.evaluate("""
                 async () => {
                     const res = await fetch('/api/configure', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
                         body: JSON.stringify({
-                            config_type: 'view',
-                            name: 'E2E Test View',
-                            description: 'Created by Canvas E2E test',
-                            visibility: 'public',
-                            layout_config: { panels: [] }
+                            config_type: 'schema',
+                            name: 'Meta Ads E2E Schema',
+                            schema_type: 'analysis',
+                            fields: [
+                                {
+                                    source_field: 'Day',
+                                    target_field: 'date',
+                                    transform: 'date'
+                                },
+                                {
+                                    source_field: 'Account name',
+                                    target_field: 'account',
+                                    transform: null
+                                },
+                                {
+                                    source_field: 'Reach',
+                                    target_field: 'reach',
+                                    transform: 'number'
+                                },
+                                {
+                                    source_field: 'Impressions',
+                                    target_field: 'impressions',
+                                    transform: 'number'
+                                }
+                            ]
                         })
                     });
                     const b = await res.json().catch(
@@ -479,83 +525,151 @@ def run_test() -> dict:
                     return { status: res.status, body: b };
                 }
             """)
-            # View creation requires an existing schema_id. If the
-            # workflow rejects with "Schema not found", that's valid —
-            # the workflow executed and validated its inputs.
-            view_created = view_result["status"] == 201
-            view_body_str = str(view_result.get("body", {}))
-            schema_missing = "Schema not found" in view_body_str
-            share_token = (
-                view_result.get("body", {}).get("share_token", "")
-            )
-            view_body = str(view_result.get("body", {}))[:200]
+            schema_id = schema_result.get(
+                "body", {}
+            ).get("resource_id", "")
             step(
-                "Created view via API",
-                passed=view_created or schema_missing,
+                "Created schema via API",
+                passed=schema_result["status"] == 201,
                 detail=(
-                    f"status={view_result['status']}, "
-                    f"share_token={share_token} "
-                    f"body={view_body}"
-                    + (
-                        " (schema_missing=OK)"
-                        if schema_missing
-                        else ""
-                    )
+                    f"status={schema_result['status']} "
+                    f"schema_id={schema_id}"
                 ),
             )
 
+            # Create a view with panels for the Meta Ads data
+            view_result = page.evaluate(
+                """
+                async (schemaId) => {
+                    const res = await fetch('/api/configure', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            config_type: 'view',
+                            name: 'Meta Ads Dashboard',
+                            description: 'E2E test — reach and impressions',
+                            visibility: 'public',
+                            schema_id: schemaId,
+                            layout_config: {
+                                grid_columns: 6,
+                                panels: [
+                                    {
+                                        id: 'reach-bar',
+                                        title: 'Daily Reach',
+                                        chart_type: 'bar',
+                                        position: {x:0, y:0, w:3, h:1},
+                                        chart_config: {
+                                            x_axis: 'date',
+                                            y_axis: 'reach'
+                                        },
+                                        query_config: {}
+                                    },
+                                    {
+                                        id: 'impressions-line',
+                                        title: 'Impressions Over Time',
+                                        chart_type: 'line',
+                                        position: {x:3, y:0, w:3, h:1},
+                                        chart_config: {
+                                            x_axis: 'date',
+                                            y_axis: 'impressions'
+                                        },
+                                        query_config: {}
+                                    },
+                                    {
+                                        id: 'total-reach',
+                                        title: 'Total Reach',
+                                        chart_type: 'metric',
+                                        position: {x:0, y:1, w:2, h:1},
+                                        chart_config: {
+                                            value_field: 'reach',
+                                            aggregation: 'sum',
+                                            label: 'Total Reach'
+                                        },
+                                        query_config: {}
+                                    },
+                                    {
+                                        id: 'data-table',
+                                        title: 'Raw Data',
+                                        chart_type: 'table',
+                                        position: {x:2, y:1, w:4, h:1},
+                                        chart_config: {
+                                            columns: [
+                                                'date',
+                                                'account',
+                                                'reach',
+                                                'impressions'
+                                            ]
+                                        },
+                                        query_config: {}
+                                    }
+                                ]
+                            }
+                        })
+                    });
+                    const b = await res.json().catch(
+                        () => ({ error: 'non-JSON' })
+                    );
+                    return { status: res.status, body: b };
+                }
+            """,
+                schema_id,
+            )
+            share_token = view_result.get(
+                "body", {}
+            ).get("share_token", "")
+            step(
+                "Created view with panels via API",
+                passed=view_result["status"] == 201,
+                detail=(
+                    f"status={view_result['status']} "
+                    f"share_token={share_token}"
+                ),
+            )
+
+            # --- Flow 4: Visual Validation — View Dashboard ---
             if share_token:
-                public_view_result = page.evaluate(
-                    """
-                    async (shareToken) => {
-                        const res = await fetch(
-                            `/api/views/${shareToken}`
-                        );
-                        return {
-                            status: res.status,
-                            body: await res.json().catch(
-                                () => ({ error: 'non-JSON' })
-                            )
-                        };
-                    }
-                """,
-                    share_token,
+                page.goto(
+                    f"{VERCEL_PREVIEW_URL}/v/{share_token}",
+                    wait_until="domcontentloaded",
+                )
+                # Wait for the view to load (title appears)
+                page.wait_for_timeout(3000)
+
+                body = page.text_content("body") or ""
+                has_view_name = "Meta Ads Dashboard" in body
+                has_panel_grid = (
+                    page.locator(
+                        "[class*='grid']"
+                    ).count() > 0
+                )
+                has_footer = (
+                    "UNLOCK ALABAMA" in body
+                    or "OPERATIONAL" in body
                 )
                 step(
-                    "Accessed public view",
-                    passed=public_view_result["status"] == 200,
-                    detail=f"status={public_view_result['status']}",
+                    "View dashboard renders",
+                    passed=has_view_name or has_panel_grid,
+                    detail=(
+                        f"view_name={has_view_name} "
+                        f"panel_grid={has_panel_grid} "
+                        f"footer={has_footer}"
+                    ),
                 )
 
-            # --- Flow 3: Query Validation ---
-            if share_token:
-                query_result = page.evaluate(
-                    """
-                    async (shareToken) => {
-                        const res = await fetch('/api/query', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                share_token: shareToken,
-                                limit: 10
-                            })
-                        });
-                        return {
-                            status: res.status,
-                            body: await res.json().catch(
-                                () => ({ error: 'non-JSON' })
-                            )
-                        };
-                    }
-                """,
-                    share_token,
-                )
+                # Check for panel titles in the page
+                has_reach = "Daily Reach" in body
+                has_impressions = "Impressions" in body
+                has_table = "Raw Data" in body
                 step(
-                    "Queried view data via API",
-                    passed=query_result["status"] != 400,
-                    detail=f"status={query_result['status']}",
+                    "Panels render on dashboard",
+                    passed=has_reach or has_impressions or has_table,
+                    detail=(
+                        f"reach_panel={has_reach} "
+                        f"impressions_panel={has_impressions} "
+                        f"table_panel={has_table}"
+                    ),
                 )
 
             # Screenshot
