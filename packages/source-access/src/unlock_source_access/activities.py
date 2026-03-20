@@ -17,11 +17,17 @@ Deprecated aliases kept for backward compatibility:
   get_source_schema → discover_schema
 """
 
+import os
+
 from temporalio import activity
 from unlock_shared.source_models import (
     ConnectionResult,
     FetchRequest,
     FetchResult,
+    IdentifySourceRequest,
+    IdentifySourceResult,
+    RegisterSourceRequest,
+    RegisterSourceResult,
     SourceConfig,
     SourceSchema,
 )
@@ -120,6 +126,134 @@ async def discover_schema(request: FetchRequest) -> SourceSchema:
         return await connector.get_schema(request)
     finally:
         await connector.close()
+
+
+# ---------------------------------------------------------------------------
+# Source registry activities — identify and register data sources
+# ---------------------------------------------------------------------------
+
+
+def _get_supabase_client():
+    """Create a Supabase client for source registry operations."""
+    from supabase import create_client
+
+    url = os.environ["SUPABASE_URL"]
+    key = os.environ["SUPABASE_SERVICE_KEY"]
+    return create_client(url, key)
+
+
+@activity.defn
+async def identify_source(request: IdentifySourceRequest) -> IdentifySourceResult:
+    """Have we seen this source before? What matches?
+
+    If name is provided: exact match lookup + partial matches.
+    If name is None: return all known sources (the "list" use case).
+    """
+    activity.logger.info(f"Identifying source: name={request.name}, type={request.source_type}")
+
+    try:
+        client = _get_supabase_client()
+        query = client.table("data_sources").select("*")
+
+        if request.name is None and request.source_type is None:
+            # List all sources
+            result = query.order("created_at", desc=True).execute()
+            return IdentifySourceResult(
+                success=True,
+                message=f"Found {len(result.data)} sources",
+                all_sources=result.data or [],
+            )
+
+        exact_match = None
+        possible_matches = []
+
+        if request.name:
+            # Exact match
+            exact_result = query.eq("name", request.name).execute()
+            if exact_result.data:
+                exact_match = exact_result.data[0]
+
+            # Partial matches (case-insensitive ILIKE)
+            partial_result = (
+                client.table("data_sources")
+                .select("*")
+                .ilike("name", f"%{request.name}%")
+                .execute()
+            )
+            possible_matches = [
+                r for r in (partial_result.data or [])
+                if not exact_match or r.get("id") != exact_match.get("id")
+            ]
+
+        if request.source_type and not exact_match:
+            type_result = (
+                client.table("data_sources")
+                .select("*")
+                .eq("protocol", request.source_type)
+                .execute()
+            )
+            for r in type_result.data or []:
+                if r not in possible_matches:
+                    possible_matches.append(r)
+
+        return IdentifySourceResult(
+            success=True,
+            message=(
+                "exact match found"
+                if exact_match
+                else f"{len(possible_matches)} possible matches"
+            ),
+            exact_match=exact_match,
+            possible_matches=possible_matches,
+        )
+    except Exception as exc:
+        return IdentifySourceResult(
+            success=False,
+            message=f"Failed to identify source: {exc}",
+        )
+
+
+@activity.defn
+async def register_source(request: RegisterSourceRequest) -> RegisterSourceResult:
+    """Onboard a new source into the registry.
+
+    Upserts into data_sources table via Supabase, sets status="active".
+    """
+    activity.logger.info(f"Registering source: {request.name} ({request.protocol})")
+
+    try:
+        client = _get_supabase_client()
+        result = (
+            client.table("data_sources")
+            .upsert(
+                {
+                    "name": request.name,
+                    "protocol": request.protocol,
+                    "service": request.service,
+                    "base_url": request.base_url,
+                    "auth_method": request.auth_method,
+                    "auth_env_var": request.auth_env_var,
+                    "resource_type": request.resource_type,
+                    "channel_key": request.channel_key,
+                    "config": request.config,
+                    "status": "active",
+                },
+                on_conflict="name",
+            )
+            .execute()
+        )
+
+        source = result.data[0] if result.data else {}
+        return RegisterSourceResult(
+            success=True,
+            message=f"Registered source '{request.name}'",
+            source=source,
+        )
+    except Exception as exc:
+        return RegisterSourceResult(
+            success=False,
+            message=f"Failed to register source: {exc}",
+        )
 
 
 # ---------------------------------------------------------------------------

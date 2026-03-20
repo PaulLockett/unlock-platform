@@ -119,6 +119,7 @@ class ConfigureRequest(BaseModel):
     schema_id: str = ""
     filters: dict[str, Any] = {}
     layout_config: dict[str, Any] = {}
+    visibility: str = "public"  # public, restricted
 
 
 class ConfigureResult(PlatformResult):
