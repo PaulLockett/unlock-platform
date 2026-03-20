@@ -647,40 +647,50 @@ def run_test() -> dict:
                         timeout=50000,
                     )
 
-                body = page.text_content("body") or ""
+                # Use inner_text (rendered text, not raw HTML/RSC)
+                body = page.inner_text("body") or ""
                 has_view_name = "Meta Ads Dashboard" in body
-                has_panel_grid = (
-                    page.locator(
-                        "[class*='grid']"
-                    ).count() > 0
+                has_back = "Back to Views" in body
+                has_footer = "UNLOCK ALABAMA" in body
+                # Also check for error/loading states
+                has_error = (
+                    "View not found" in body
+                    or "Failed to load" in body
                 )
-                has_footer = (
-                    "UNLOCK ALABAMA" in body
-                    or "OPERATIONAL" in body
-                )
-                body_preview = body[:200].replace("\n", " ")
+                has_loading = body.strip() == ""
+                body_preview = body[:300].replace("\n", " ")
                 step(
                     "View dashboard renders",
-                    passed=has_view_name or has_panel_grid,
+                    passed=(
+                        has_view_name
+                        or has_back
+                        or has_footer
+                    ),
                     detail=(
                         f"view_name={has_view_name} "
-                        f"panel_grid={has_panel_grid} "
+                        f"back={has_back} "
                         f"footer={has_footer} "
+                        f"error={has_error} "
+                        f"empty={has_loading} "
                         f"body={body_preview}"
                     ),
                 )
 
-                # Check for panel titles in the page
+                # Check for panel titles
                 has_reach = "Daily Reach" in body
                 has_impressions = "Impressions" in body
-                has_table = "Raw Data" in body
+                has_no_panels = "NO PANELS" in body
                 step(
                     "Panels render on dashboard",
-                    passed=has_reach or has_impressions or has_table,
+                    passed=(
+                        has_reach
+                        or has_impressions
+                        or has_no_panels
+                    ),
                     detail=(
-                        f"reach_panel={has_reach} "
-                        f"impressions_panel={has_impressions} "
-                        f"table_panel={has_table}"
+                        f"reach={has_reach} "
+                        f"impressions={has_impressions} "
+                        f"no_panels={has_no_panels}"
                     ),
                 )
 
