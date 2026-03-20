@@ -32,11 +32,15 @@ export async function middleware(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
 
-  // Public routes: login, auth callbacks, and shared view pages
+  // Public routes: login, auth callbacks, shared view pages, and API routes.
+  // API routes handle their own auth via requireAuth/requireAdmin/getSessionUser,
+  // so the middleware should not redirect them — routes like /api/query and
+  // /api/views/[shareToken] intentionally allow anonymous access.
   const isPublic =
     path === "/login" ||
     path.startsWith("/auth/") ||
-    path.startsWith("/v/");
+    path.startsWith("/v/") ||
+    path.startsWith("/api/");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
