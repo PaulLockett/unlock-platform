@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth/session";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
+export const maxDuration = 60;
+
 /**
  * GET /api/views — list views accessible to the current user.
  * Returns all active views (survey_configs with config_type="view").

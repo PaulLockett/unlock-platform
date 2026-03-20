@@ -80,6 +80,9 @@ VAR_ROUTING: dict[str, list[str]] = {
     "POSTHOG_API_KEY": ["source-access"],
     "POSTHOG_PROJECT_ID": ["source-access"],
     "RB2B_API_KEY": ["source-access"],
+    # Source Access — Supabase REST API for source registry (identify/register)
+    "SUPABASE_URL": ["source-access"],
+    "SUPABASE_SERVICE_KEY": ["source-access"],
     # Data Access — Supabase direct connection
     "SUPABASE_DB_URL": ["data-access"],
     # Config Access — Upstash Redis

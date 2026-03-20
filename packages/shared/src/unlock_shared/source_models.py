@@ -14,6 +14,7 @@ Design choices:
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -66,3 +67,60 @@ class SourceSchema(PlatformResult):
 
     source_id: str = ""
     fields: dict[str, str] = {}
+
+
+# ---------------------------------------------------------------------------
+# Source registry models — identify and register data sources
+# ---------------------------------------------------------------------------
+
+
+class SourceRecord(BaseModel):
+    """A registered data source in the platform registry."""
+
+    id: str = ""
+    name: str = ""
+    protocol: str = ""
+    service: str = ""
+    base_url: str = ""
+    auth_method: str = ""
+    auth_env_var: str = ""
+    resource_type: str = "posts"
+    channel_key: str = ""
+    config: dict[str, Any] = {}
+    status: str = "active"
+    created_at: str = ""
+
+
+class IdentifySourceRequest(BaseModel):
+    """Input for identify_source: look up sources by name or list all."""
+
+    name: str | None = None
+    source_type: str | None = None
+
+
+class IdentifySourceResult(PlatformResult):
+    """Result of source identification — exact match, fuzzy matches, or full list."""
+
+    exact_match: dict[str, Any] | None = None
+    possible_matches: list[dict[str, Any]] = []
+    all_sources: list[dict[str, Any]] | None = None
+
+
+class RegisterSourceRequest(BaseModel):
+    """Input for register_source: onboard a new source into the registry."""
+
+    name: str
+    protocol: str
+    service: str = ""
+    base_url: str = ""
+    auth_method: str = ""
+    auth_env_var: str = ""
+    resource_type: str = "posts"
+    channel_key: str = ""
+    config: dict[str, Any] = {}
+
+
+class RegisterSourceResult(PlatformResult):
+    """Result of source registration."""
+
+    source: dict[str, Any] = {}
