@@ -59,15 +59,44 @@ export default function CreateViewModal({
     setStatus("Starting...");
 
     try {
-      // Step 1: Start the workflow (returns immediately)
+      const viewName = name.trim();
+
+      // Step 1: Create the schema first (separate workflow)
+      setStatus("Creating schema...");
+      const schemaRes = await fetch("/api/configure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          config_type: "schema",
+          name: `${viewName} Schema`,
+          schema_type: "analysis",
+        }),
+      });
+
+      const schemaStart = await schemaRes.json();
+      if (!schemaStart.success) {
+        setError(schemaStart.message || "Failed to start schema creation");
+        return;
+      }
+
+      const schemaResult = await waitForWorkflow(schemaStart.workflowId);
+      if (!schemaResult.success) {
+        setError(
+          (schemaResult.message as string) || "Failed to create schema",
+        );
+        return;
+      }
+
+      // Step 2: Create the view with the schema_id
+      setStatus("Creating view...");
       const res = await fetch("/api/configure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           config_type: "view",
-          name: name.trim(),
+          name: viewName,
           description: description.trim() || null,
-          schema_id: "",
+          schema_id: schemaResult.resource_id,
           layout_config: { grid_columns: 6, panels: [] },
           visibility: "public",
         }),
@@ -79,8 +108,8 @@ export default function CreateViewModal({
         return;
       }
 
-      // Step 2: Wait for the workflow to complete
-      setStatus("Creating schema and view...");
+      // Step 3: Wait for the view workflow to complete
+      setStatus("Activating view...");
       const result = await waitForWorkflow(startResult.workflowId);
 
       if (!result.success) {
@@ -88,7 +117,7 @@ export default function CreateViewModal({
         return;
       }
 
-      // Step 3: Redirect to the new view
+      // Step 4: Redirect to the new view
       setStatus("Redirecting...");
       router.push(`/v/${result.share_token}?edit=true`);
       onClose();
