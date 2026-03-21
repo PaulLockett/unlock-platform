@@ -18,45 +18,58 @@ export async function getTemporalClient(): Promise<Client> {
 
   const namespace = process.env.TEMPORAL_NAMESPACE ?? "default";
 
-  let connection: Connection;
+  // Race the connection against a hard 15s timeout.
+  // Connection.connect()'s connectTimeout only covers gRPC readiness,
+  // not DNS/TLS-level hangs that can block indefinitely in serverless.
+  const connectWithTimeout = async (): Promise<Client> => {
+    let connection: Connection;
 
-  if (process.env.TEMPORAL_API_KEY) {
-    // Temporal Cloud: API key authentication.
-    // Regional endpoints require the temporal-namespace metadata header
-    // for request routing.
-    const address =
-      process.env.TEMPORAL_REGIONAL_ENDPOINT ??
-      process.env.TEMPORAL_ADDRESS ??
-      "localhost:7233";
-    connection = await Connection.connect({
-      address,
-      apiKey: process.env.TEMPORAL_API_KEY,
-      tls: true,
-      connectTimeout: "10s",
-      metadata: {
-        "temporal-namespace": namespace,
-      },
-    });
-  } else if (process.env.TEMPORAL_TLS_CERT && process.env.TEMPORAL_TLS_KEY) {
-    // Temporal Cloud: mTLS authentication (legacy)
-    const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
-    connection = await Connection.connect({
-      address,
-      connectTimeout: "10s",
-      tls: {
-        clientCertPair: {
-          crt: Buffer.from(process.env.TEMPORAL_TLS_CERT, "base64"),
-          key: Buffer.from(process.env.TEMPORAL_TLS_KEY, "base64"),
+    if (process.env.TEMPORAL_API_KEY) {
+      const address =
+        process.env.TEMPORAL_REGIONAL_ENDPOINT ??
+        process.env.TEMPORAL_ADDRESS ??
+        "localhost:7233";
+      connection = await Connection.connect({
+        address,
+        apiKey: process.env.TEMPORAL_API_KEY,
+        tls: true,
+        connectTimeout: "10s",
+        metadata: { "temporal-namespace": namespace },
+      });
+    } else if (process.env.TEMPORAL_TLS_CERT && process.env.TEMPORAL_TLS_KEY) {
+      const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
+      connection = await Connection.connect({
+        address,
+        connectTimeout: "10s",
+        tls: {
+          clientCertPair: {
+            crt: Buffer.from(process.env.TEMPORAL_TLS_CERT, "base64"),
+            key: Buffer.from(process.env.TEMPORAL_TLS_KEY, "base64"),
+          },
         },
-      },
-    });
-  } else {
-    // Local dev: no TLS
-    const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
-    connection = await Connection.connect({ address, connectTimeout: "10s" });
-  }
+      });
+    } else {
+      const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
+      connection = await Connection.connect({
+        address,
+        connectTimeout: "10s",
+      });
+    }
 
-  _client = new Client({ connection, namespace });
+    return new Client({ connection, namespace });
+  };
+
+  const client = await Promise.race([
+    connectWithTimeout(),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Temporal connection timed out (15s)")),
+        15_000,
+      ),
+    ),
+  ]);
+
+  _client = client;
   return _client;
 }
 
