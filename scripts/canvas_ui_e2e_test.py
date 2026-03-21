@@ -311,16 +311,14 @@ def run_test() -> dict:
             )
 
             # --- Step 6: Click "Create New View" ---
-            # Wait for view grid to finish loading (skeleton → cards)
-            # The CreateViewCard renders after SurveyConfigsWorkflow
-            # returns via Temporal, which can take 10-30s.
-            # With many test views, the card may be below the fold.
+            # The CreateViewCard appears after the view grid finishes
+            # loading (GET /api/views). With Temporal cold starts this
+            # can take 15-30s. Wait for the element to exist in the
+            # DOM (attached), then scroll into view and click.
             create_card = page.locator(
                 "text=Create New View"
             ).first
-            # Scroll to bottom to make the card visible if below fold
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            create_card.wait_for(state="visible", timeout=55000)
+            create_card.wait_for(state="attached", timeout=55000)
             create_card.scroll_into_view_if_needed()
             create_card.click()
             step("Clicked Create New View")
