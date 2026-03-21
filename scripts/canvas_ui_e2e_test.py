@@ -292,26 +292,39 @@ def run_test() -> dict:
             step("Clicked Create New View")
 
             # --- Step 7: Fill modal and create ---
-            modal = page.locator("text=Create View").first
-            modal.wait_for(timeout=5000)
+            # Wait for modal to be fully visible
+            page.wait_for_selector(
+                "text=New Dashboard", timeout=5000
+            )
 
+            # The name input has autoFocus — click it and type
             name_input = page.locator(
-                'input[placeholder*="Revenue"],'
-                'input[placeholder*="Metrics"],'
-                'input[type="text"]'
-            ).first
-            name_input.fill("Meta Ads Overview")
+                'input[placeholder*="Q4 Revenue"]'
+            )
+            name_input.click()
+            name_input.fill("")  # clear any existing value
+            name_input.type("Meta Ads Overview", delay=50)
 
             desc_input = page.locator("textarea").first
-            desc_input.fill(
-                "Reach and impressions from Meta Ads campaign"
+            desc_input.click()
+            desc_input.type(
+                "Reach and impressions from Meta Ads campaign",
+                delay=30,
+            )
+
+            # Verify the name was actually set
+            name_value = name_input.input_value()
+            step(
+                "Filled modal form",
+                passed=bool(name_value),
+                detail=f"name='{name_value}'",
             )
 
             create_btn = page.locator(
                 'button:has-text("Create View")'
             ).last
             create_btn.click()
-            step("Filled modal and clicked Create")
+            step("Clicked Create View")
 
             # --- Step 8: View dashboard loads ---
             # Modal submits ConfigureWorkflow which now auto-creates
