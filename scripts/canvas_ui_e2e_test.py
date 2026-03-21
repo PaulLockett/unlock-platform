@@ -427,11 +427,18 @@ def run_test() -> dict:
             step("Navigated back to home")
 
             # --- Step 10: Verify new view appears ---
+            # The home page fetches views via SurveyConfigsWorkflow.
+            # Wait for the page to fully load and render view cards.
             page.wait_for_selector(
                 "text=Welcome back", timeout=30000
             )
+            # Give the view grid time to populate from Temporal
+            page.wait_for_timeout(3000)
             body = page.inner_text("body")
             has_new_view = "META ADS OVERVIEW" in body.upper()
+            # The view name might render as the original casing
+            if not has_new_view:
+                has_new_view = "Meta Ads Overview" in body
             step(
                 "New view card visible on home",
                 passed=has_new_view,
