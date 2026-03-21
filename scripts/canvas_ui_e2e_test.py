@@ -314,8 +314,10 @@ def run_test() -> dict:
             step("Filled modal and clicked Create")
 
             # --- Step 8: View dashboard loads ---
-            # Modal submits ConfigureWorkflow, then redirects to /v/...
-            page.wait_for_url("**/v/**", timeout=55000)
+            # Modal submits ConfigureWorkflow which now auto-creates
+            # a schema (publish_schema) then the view (activate_view).
+            # Two Temporal activities = up to 60s total execution.
+            page.wait_for_url("**/v/**", timeout=90000)
             share_token = page.url.split("/v/")[-1].split("?")[0]
             step(
                 "Redirected to view dashboard",
