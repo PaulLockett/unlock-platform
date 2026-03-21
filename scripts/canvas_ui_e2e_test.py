@@ -442,19 +442,17 @@ def run_test() -> dict:
             # view card with the name we created.
             with contextlib.suppress(Exception):
                 page.wait_for_selector(
-                    "text=Meta Ads Overview", timeout=30000
+                    "text=META ADS OVERVIEW", timeout=30000
                 )
 
             body = page.inner_text("body")
-            has_new_view = "Meta Ads Overview" in body
+            # View card title uses CSS text-transform: uppercase,
+            # so inner_text() returns "META ADS OVERVIEW"
+            has_new_view = "META ADS OVERVIEW" in body
             step(
                 "New view card visible on home",
                 passed=has_new_view,
-                detail=(
-                    f"found={has_new_view} "
-                    f"body_len={len(body)} "
-                    f"body={body[:500]}"
-                ),
+                detail=f"found={has_new_view}",
             )
 
             # Screenshot
