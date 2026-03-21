@@ -326,11 +326,20 @@ def run_test() -> dict:
             create_btn.click()
             step("Clicked Create View")
 
-            # --- Step 8: View dashboard loads ---
-            # Modal submits ConfigureWorkflow which now auto-creates
-            # a schema (publish_schema) then the view (activate_view).
-            # Two Temporal activities = up to 60s total execution.
-            page.wait_for_url("**/v/**", timeout=90000)
+            # --- Step 8: Wait for view creation ---
+            # Modal starts workflow (instant), then polls for result.
+            # Wait for either redirect to /v/... OR an error in the modal.
+            try:
+                page.wait_for_url("**/v/**", timeout=90000)
+            except Exception:
+                # Check if modal shows an error
+                modal_text = page.inner_text("body") or ""
+                modal_preview = modal_text[:300].replace("\n", " ")
+                step(
+                    "View creation completed",
+                    passed=False,
+                    detail=f"No redirect. Modal: {modal_preview}",
+                )
             share_token = page.url.split("/v/")[-1].split("?")[0]
             step(
                 "Redirected to view dashboard",
