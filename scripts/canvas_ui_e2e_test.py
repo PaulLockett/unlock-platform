@@ -402,6 +402,10 @@ def run_test() -> dict:
                 detail=f"share_token={share_token}",
             )
 
+            # The client-side router.push may not fully load the
+            # server component. Reload to ensure full SSR rendering.
+            page.reload(wait_until="load")
+
             # Wait for the view page content to render.
             # The loading spinner has no text, so we must wait for
             # actual content: the "Back to Views" link or the footer.
