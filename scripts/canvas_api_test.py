@@ -483,8 +483,26 @@ def run_test() -> dict:
             )
 
             # --- Flow 3: Create Schema + View with Panels ---
+            # Configure routes now return 202 + workflowId (async).
+            # Helper polls /api/workflow/{id} until completion.
+            POLL_WORKFLOW_JS = """
+                async (workflowId) => {
+                    for (let i = 0; i < 25; i++) {
+                        await new Promise(r => setTimeout(r, 3000));
+                        const res = await fetch('/api/workflow/' + workflowId);
+                        const data = await res.json();
+                        if (data.status === 'COMPLETED') return data.result;
+                        if (data.status === 'FAILED' || data.status === 'TIMED_OUT'
+                            || data.status === 'CANCELLED') {
+                            return { success: false, error: data.error || data.status };
+                        }
+                    }
+                    return { success: false, error: 'poll timeout' };
+                }
+            """
+
             # Create a schema for the Meta Ads data
-            schema_result = page.evaluate("""
+            schema_start = page.evaluate("""
                 async () => {
                     const res = await fetch('/api/configure', {
                         method: 'POST',
@@ -525,20 +543,36 @@ def run_test() -> dict:
                     return { status: res.status, body: b };
                 }
             """)
-            schema_id = schema_result.get(
+            schema_wf_id = schema_start.get(
                 "body", {}
-            ).get("resource_id", "")
+            ).get("workflowId", "")
             step(
-                "Created schema via API",
-                passed=schema_result["status"] == 201,
+                "Started schema workflow",
+                passed=schema_start["status"] == 202,
                 detail=(
-                    f"status={schema_result['status']} "
-                    f"schema_id={schema_id}"
+                    f"status={schema_start['status']} "
+                    f"workflowId={schema_wf_id}"
+                ),
+            )
+
+            # Poll for schema workflow result
+            schema_result = page.evaluate(
+                POLL_WORKFLOW_JS, schema_wf_id
+            )
+            schema_id = (schema_result or {}).get("resource_id", "")
+            step(
+                "Schema workflow completed",
+                passed=bool(
+                    schema_result and schema_result.get("success")
+                ),
+                detail=(
+                    f"schema_id={schema_id} "
+                    f"result={str(schema_result)[:200]}"
                 ),
             )
 
             # Create a view with panels for the Meta Ads data
-            view_result = page.evaluate(
+            view_start = page.evaluate(
                 """
                 async (schemaId) => {
                     const res = await fetch('/api/configure', {
@@ -616,15 +650,33 @@ def run_test() -> dict:
             """,
                 schema_id,
             )
-            share_token = view_result.get(
+            view_wf_id = view_start.get(
                 "body", {}
-            ).get("share_token", "")
+            ).get("workflowId", "")
             step(
-                "Created view with panels via API",
-                passed=view_result["status"] == 201,
+                "Started view workflow",
+                passed=view_start["status"] == 202,
                 detail=(
-                    f"status={view_result['status']} "
-                    f"share_token={share_token}"
+                    f"status={view_start['status']} "
+                    f"workflowId={view_wf_id}"
+                ),
+            )
+
+            # Poll for view workflow result
+            view_result = page.evaluate(
+                POLL_WORKFLOW_JS, view_wf_id
+            )
+            share_token = (view_result or {}).get(
+                "share_token", ""
+            )
+            step(
+                "View workflow completed",
+                passed=bool(
+                    view_result and view_result.get("success")
+                ),
+                detail=(
+                    f"share_token={share_token} "
+                    f"result={str(view_result)[:200]}"
                 ),
             )
 

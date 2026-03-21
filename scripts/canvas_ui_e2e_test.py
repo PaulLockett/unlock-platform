@@ -327,18 +327,40 @@ def run_test() -> dict:
             step("Clicked Create View")
 
             # --- Step 8: Wait for view creation ---
-            # Modal starts workflow (instant), then polls for result.
-            # Wait for either redirect to /v/... OR an error in the modal.
+            # Modal starts workflow via POST /api/configure (returns
+            # 202 + workflowId instantly), then polls
+            # GET /api/workflow/{id} every 3s. On COMPLETED the modal
+            # redirects to /v/{share_token}. Budget 90s for the full
+            # async cycle.
             try:
                 page.wait_for_url("**/v/**", timeout=90000)
             except Exception:
-                # Check if modal shows an error
-                modal_text = page.inner_text("body") or ""
-                modal_preview = modal_text[:300].replace("\n", " ")
+                # Capture the modal overlay text (appears at the end
+                # of body DOM) — look for error/status messages.
+                body_text = page.inner_text("body") or ""
+                # Grab the LAST 500 chars — modal content is at the
+                # end of the DOM, not the beginning.
+                modal_tail = body_text[-500:].replace("\n", " ")
+                # Also check for specific error/loading states
+                has_error = any(
+                    s in body_text
+                    for s in [
+                        "Failed",
+                        "Error",
+                        "did not complete",
+                        "timed out",
+                    ]
+                )
+                has_loading = "Creating" in body_text
                 step(
                     "View creation completed",
                     passed=False,
-                    detail=f"No redirect. Modal: {modal_preview}",
+                    detail=(
+                        f"No redirect after 90s. "
+                        f"error={has_error} loading={has_loading} "
+                        f"url={page.url} "
+                        f"tail={modal_tail}"
+                    ),
                 )
             share_token = page.url.split("/v/")[-1].split("?")[0]
             step(

@@ -9,6 +9,9 @@ let _client: Client | null = null;
  * 1. API key auth: TEMPORAL_API_KEY + TEMPORAL_REGIONAL_ENDPOINT (Temporal Cloud)
  * 2. mTLS auth: TEMPORAL_TLS_CERT + TEMPORAL_TLS_KEY (Temporal Cloud, legacy)
  * 3. Local dev: localhost:7233, no auth
+ *
+ * Uses lazy connections for serverless compatibility — the gRPC channel is
+ * established on the first RPC call rather than eagerly on connect().
  */
 export async function getTemporalClient(): Promise<Client> {
   if (_client) return _client;
@@ -18,20 +21,25 @@ export async function getTemporalClient(): Promise<Client> {
   let connection: Connection;
 
   if (process.env.TEMPORAL_API_KEY) {
-    // Temporal Cloud: API key authentication
+    // Temporal Cloud: API key authentication with lazy connection.
+    // Regional endpoints require the temporal-namespace metadata header
+    // for request routing.
     const address =
       process.env.TEMPORAL_REGIONAL_ENDPOINT ??
       process.env.TEMPORAL_ADDRESS ??
       "localhost:7233";
-    connection = await Connection.connect({
+    connection = Connection.lazy({
       address,
       apiKey: process.env.TEMPORAL_API_KEY,
       tls: true,
+      metadata: {
+        "temporal-namespace": namespace,
+      },
     });
   } else if (process.env.TEMPORAL_TLS_CERT && process.env.TEMPORAL_TLS_KEY) {
     // Temporal Cloud: mTLS authentication (legacy)
     const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
-    connection = await Connection.connect({
+    connection = Connection.lazy({
       address,
       tls: {
         clientCertPair: {
@@ -43,7 +51,7 @@ export async function getTemporalClient(): Promise<Client> {
   } else {
     // Local dev: no TLS
     const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
-    connection = await Connection.connect({ address });
+    connection = Connection.lazy({ address });
   }
 
   _client = new Client({ connection, namespace });
