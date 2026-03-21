@@ -86,30 +86,54 @@ def create_browserbase_session() -> dict:
     return resp.json()
 
 
-def poll_resend_for_email(
-    recipient: str, *, timeout: float = EMAIL_POLL_TIMEOUT
-) -> dict:
-    deadline = time.monotonic() + timeout
+def _resend_get(url: str, **kwargs) -> httpx.Response:
     headers = {"Authorization": f"Bearer {RESEND_API_KEY}"}
+    for attempt in range(4):
+        resp = httpx.get(url, headers=headers, timeout=15, **kwargs)
+        if resp.status_code != 429:
+            resp.raise_for_status()
+            return resp
+        time.sleep(2 ** attempt)
+    resp.raise_for_status()
+    return resp
 
-    def _get(url: str, **kwargs) -> httpx.Response:
-        for attempt in range(4):
-            resp = httpx.get(url, headers=headers, timeout=15, **kwargs)
-            if resp.status_code != 429:
-                resp.raise_for_status()
-                return resp
-            time.sleep(2 ** attempt)
-        resp.raise_for_status()
-        return resp
+
+def get_latest_email_id(recipient: str) -> str | None:
+    """Return the ID of the most recent email to *recipient*, or None."""
+    data = _resend_get(
+        "https://api.resend.com/emails",
+        params={"limit": 5},
+    ).json()
+    for email in data.get("data", []):
+        if recipient in email.get("to", []):
+            return email["id"]
+    return None
+
+
+def poll_resend_for_email(
+    recipient: str,
+    *,
+    timeout: float = EMAIL_POLL_TIMEOUT,
+    ignore_id: str | None = None,
+) -> dict:
+    """Poll Resend for a new email to *recipient*.
+
+    If *ignore_id* is set, skip that email (and any older ones with the
+    same ID). This prevents parallel tests from picking up each other's
+    magic-link emails.
+    """
+    deadline = time.monotonic() + timeout
 
     while time.monotonic() < deadline:
-        data = _get(
+        data = _resend_get(
             "https://api.resend.com/emails",
             params={"limit": 20},
         ).json()
         for email in data.get("data", []):
             if recipient in email.get("to", []):
-                return _get(
+                if ignore_id and email["id"] == ignore_id:
+                    break  # this is the old email; nothing newer yet
+                return _resend_get(
                     f"https://api.resend.com/emails/{email['id']}"
                 ).json()
         time.sleep(EMAIL_POLL_INTERVAL)
@@ -224,6 +248,10 @@ def run_test() -> dict:
             )
             step("Navigated to login page")
 
+            # Snapshot the latest email ID BEFORE sending the magic
+            # link so we can skip stale emails from parallel tests.
+            pre_send_email_id = get_latest_email_id(test_email)
+
             # Submit magic link with retry
             login_url = f"{VERCEL_PREVIEW_URL}/login"
             magic_link_sent = False
@@ -255,7 +283,9 @@ def run_test() -> dict:
             )
 
             # --- Step 4: Get magic link email ---
-            email_data = poll_resend_for_email(test_email)
+            email_data = poll_resend_for_email(
+                test_email, ignore_id=pre_send_email_id
+            )
             step("Received magic link email")
 
             html_body = email_data.get("html", "") or email_data.get(
