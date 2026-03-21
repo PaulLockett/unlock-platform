@@ -27,6 +27,7 @@ with workflow.unsafe.imports_passed_through():
         FieldMapping,
         FunnelStage,
         PublishSchemaRequest,
+        PublishSchemaResult,
         TransformRule,
     )
     from unlock_shared.manager_models import ConfigureRequest, ConfigureResult
@@ -145,6 +146,7 @@ class ConfigureWorkflow:
                 ),
                 task_queue=CONFIG_ACCESS_QUEUE,
                 start_to_close_timeout=timedelta(seconds=30),
+                result_type=PublishSchemaResult,
             )
 
             if not schema_result.success:
@@ -158,6 +160,17 @@ class ConfigureWorkflow:
                 )
 
             schema_id = schema_result.schema_id
+
+            if not schema_id:
+                return ConfigureResult(
+                    success=False,
+                    message=(
+                        f"Auto-created schema has empty ID. "
+                        f"Result type: {type(schema_result).__name__}, "
+                        f"result: {schema_result}"
+                    ),
+                    config_type="view",
+                )
 
         result = await workflow.execute_activity(
             activate_view,
