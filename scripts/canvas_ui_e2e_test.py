@@ -402,13 +402,15 @@ def run_test() -> dict:
                 detail=f"share_token={share_token}",
             )
 
-            # Wait for the view page to fully load.
-            # The page uses SSR with RetrieveViewWorkflow — on cold
-            # start this can take 10-20s. Wait for the page to have
-            # substantial content (not just empty or loading spinner).
-            page.wait_for_load_state("networkidle", timeout=60000)
-            # Give React time to hydrate
-            page.wait_for_timeout(3000)
+            # Wait for the view page content to render.
+            # The loading spinner has no text, so we must wait for
+            # actual content: the "Back to Views" link or the footer.
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                page.wait_for_selector(
+                    "text=Back to Views", timeout=60000
+                )
 
             body = page.inner_text("body")
             has_title = "META ADS OVERVIEW" in body.upper()
