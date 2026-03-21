@@ -453,7 +453,7 @@ def run_test() -> dict:
                 detail=(
                     f"found={has_new_view} "
                     f"body_len={len(body)} "
-                    f"body_preview={body[:200]}"
+                    f"body={body[:500]}"
                 ),
             )
 
