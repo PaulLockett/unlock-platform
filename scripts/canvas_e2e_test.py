@@ -676,10 +676,11 @@ def run_test() -> dict:
                     ),
                 )
 
-                # Check for panel titles
-                has_reach = "Daily Reach" in body
-                has_impressions = "Impressions" in body
-                has_no_panels = "NO PANELS" in body
+                # Check for panel titles (rendered uppercase by CSS)
+                body_upper = body.upper()
+                has_reach = "DAILY REACH" in body_upper
+                has_impressions = "IMPRESSIONS" in body_upper
+                has_no_panels = "NO PANELS" in body_upper
                 step(
                     "Panels render on dashboard",
                     passed=(
