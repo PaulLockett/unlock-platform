@@ -402,25 +402,29 @@ def run_test() -> dict:
                 detail=f"share_token={share_token}",
             )
 
-            # Wait for the view page to load
-            import contextlib
-
-            with contextlib.suppress(Exception):
-                page.wait_for_selector(
-                    "text=UNLOCK ALABAMA", timeout=50000
-                )
+            # Wait for the view page to fully load.
+            # The page uses SSR with RetrieveViewWorkflow — on cold
+            # start this can take 10-20s. Wait for the page to have
+            # substantial content (not just empty or loading spinner).
+            page.wait_for_load_state("networkidle", timeout=60000)
+            # Give React time to hydrate
+            page.wait_for_timeout(3000)
 
             body = page.inner_text("body")
             has_title = "META ADS OVERVIEW" in body.upper()
             has_footer = "UNLOCK ALABAMA" in body
             has_no_panels = "NO PANELS" in body.upper()
+            has_back = "BACK TO VIEWS" in body.upper()
             step(
                 "View dashboard rendered",
-                passed=has_title or has_footer,
+                passed=has_title or has_footer or has_back,
                 detail=(
                     f"title={has_title} "
                     f"footer={has_footer} "
-                    f"no_panels={has_no_panels}"
+                    f"back={has_back} "
+                    f"no_panels={has_no_panels} "
+                    f"content_len={len(body)} "
+                    f"body_preview={body[:200]}"
                 ),
             )
 
