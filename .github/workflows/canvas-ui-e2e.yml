@@ -1,0 +1,162 @@
+name: Canvas UI E2E
+
+# Exercises the full Canvas data lifecycle + view sharing flow via
+# Browserbase + Playwright against the Vercel preview deployment.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+  deployments: read
+
+jobs:
+  canvas-api:
+    name: Canvas — UI E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # -- Wait for Vercel preview deployment --
+      - name: Wait for Vercel preview
+        id: vercel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          echo "Waiting for Vercel preview deployment for $SHA..."
+
+          for i in $(seq 1 40); do
+            URL=$(gh api "repos/${{ github.repository }}/deployments?sha=$SHA&environment=Preview" \
+              --jq '.[0].id' 2>/dev/null || echo "")
+
+            if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+              DEPLOY_ID="$URL"
+              STATE=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOY_ID/statuses" \
+                --jq '.[0].state' 2>/dev/null || echo "")
+              ENV_URL=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOY_ID/statuses" \
+                --jq '.[0].environment_url' 2>/dev/null || echo "")
+
+              if [ "$STATE" = "success" ] && [ -n "$ENV_URL" ] && [ "$ENV_URL" != "null" ]; then
+                echo "Vercel preview is live: $ENV_URL"
+                echo "url=$ENV_URL" >> "$GITHUB_OUTPUT"
+                echo "ready=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "  Attempt $i: deployment $DEPLOY_ID state=$STATE"
+            else
+              echo "  Attempt $i: no deployment found yet"
+            fi
+
+            sleep 15
+          done
+
+          echo "Timed out waiting for Vercel preview (10 min)"
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+
+      # -- Python + dependencies --
+      - name: Set up Python
+        if: steps.vercel.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        if: steps.vercel.outputs.ready == 'true'
+        run: pip install httpx playwright
+
+      - name: Install Playwright Chromium
+        if: steps.vercel.outputs.ready == 'true'
+        run: playwright install chromium
+
+      # -- Run E2E test --
+      - name: Run Canvas UI E2E test
+        if: steps.vercel.outputs.ready == 'true'
+        id: test
+        continue-on-error: true
+        env:
+          VERCEL_PREVIEW_URL: ${{ steps.vercel.outputs.url }}
+          BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+          BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VERCEL_PROTECTION_BYPASS_TOKEN: ${{ secrets.VERCEL_PROTECTION_BYPASS_TOKEN }}
+          TEST_ADMIN_EMAIL: ${{ secrets.TEST_ADMIN_EMAIL }}
+          RESULT_JSON: /tmp/canvas-ui-result.json
+        run: python scripts/canvas_ui_e2e_test.py
+
+      # -- Parse results --
+      - name: Parse test results
+        if: steps.vercel.outputs.ready == 'true'
+        id: results
+        run: |
+          if [ -f /tmp/canvas-ui-result.json ]; then
+            RECORDING=$(python3 -c "import json; d=json.load(open('/tmp/canvas-ui-result.json')); print(d.get('recording_url',''))")
+            DURATION=$(python3 -c "import json; d=json.load(open('/tmp/canvas-ui-result.json')); print(d.get('duration_s','?'))")
+            TEST_EMAIL=$(python3 -c "import json; d=json.load(open('/tmp/canvas-ui-result.json')); print(d.get('test_email',''))")
+
+            STEP_LINES=$(python3 -c "
+          import json
+          d = json.load(open('/tmp/canvas-ui-result.json'))
+          for i, s in enumerate(d.get('steps', []), 1):
+              icon = '✅' if s['passed'] else '❌'
+              detail = f\" ({s['detail']})\" if s.get('detail') else ''
+              print(f\"{i}. {icon} {s['name']}{detail}\")
+          ")
+          else
+            RECORDING=""
+            DURATION="?"
+            TEST_EMAIL=""
+            STEP_LINES="No result file produced"
+          fi
+
+          echo "recording=$RECORDING" >> "$GITHUB_OUTPUT"
+          echo "duration=$DURATION" >> "$GITHUB_OUTPUT"
+          echo "test_email=$TEST_EMAIL" >> "$GITHUB_OUTPUT"
+          {
+            echo "step_lines<<STEPS_EOF"
+            echo "$STEP_LINES"
+            echo "STEPS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # -- Sticky PR comment --
+      - name: Post or update PR comment
+        if: steps.vercel.outputs.ready == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: canvas-ui-e2e
+          message: |
+            📊 **Canvas API — UI E2E — Visual Interaction**
+
+            | | |
+            |---|---|
+            | **Status** | ${{ steps.test.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
+            | **Preview** | [${{ steps.vercel.outputs.url }}](${{ steps.vercel.outputs.url }}) |
+            | **Recording** | [Watch on Browserbase](${{ steps.results.outputs.recording }}) |
+            | **Duration** | ${{ steps.results.outputs.duration }}s |
+            | **Test Email** | `${{ steps.results.outputs.test_email }}` |
+
+            <details><summary>Test Steps</summary>
+
+            ${{ steps.results.outputs.step_lines }}
+
+            </details>
+
+      # -- Comment if Vercel timed out --
+      - name: Post timeout comment
+        if: steps.vercel.outputs.ready != 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: canvas-ui-e2e
+          message: |
+            📊 **Canvas API — UI E2E — Visual Interaction**
+
+            | | |
+            |---|---|
+            | **Status** | ⚠️ Skipped — Vercel preview not ready within 10 min |
+
+      # -- Fail the check if test failed --
+      - name: Require Canvas UI E2E pass
+        if: steps.vercel.outputs.ready == 'true' && steps.test.outcome == 'failure'
+        run: |
+          echo "Canvas UI E2E test failed — see PR comment for details."
+          exit 1
