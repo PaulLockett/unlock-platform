@@ -122,13 +122,49 @@ class ConfigureWorkflow:
         )
 
     async def _configure_view(self, request: ConfigureRequest) -> ConfigureResult:
-        """Activate a data view in Config Access."""
+        """Activate a data view in Config Access.
+
+        If no schema_id is provided, the manager auto-creates a default
+        schema for the view first. Every view must have a schema —
+        the manager handles this orchestration so the client doesn't
+        need to know about schemas.
+        """
+        schema_id = request.schema_id
+
+        if not schema_id:
+            # Auto-create a default schema for this view
+            schema_result = await workflow.execute_activity(
+                publish_schema,
+                PublishSchemaRequest(
+                    name=f"{request.name} Schema",
+                    description=f"Auto-created schema for {request.name}",
+                    schema_type="analysis",
+                    fields=[],
+                    funnel_stages=[],
+                    created_by=request.created_by,
+                ),
+                task_queue=CONFIG_ACCESS_QUEUE,
+                start_to_close_timeout=timedelta(seconds=30),
+            )
+
+            if not schema_result.success:
+                return ConfigureResult(
+                    success=False,
+                    message=(
+                        f"Failed to create schema for view: "
+                        f"{schema_result.message}"
+                    ),
+                    config_type="view",
+                )
+
+            schema_id = schema_result.schema_id
+
         result = await workflow.execute_activity(
             activate_view,
             ActivateViewRequest(
                 name=request.name,
                 description=request.description,
-                schema_id=request.schema_id,
+                schema_id=schema_id,
                 visibility=request.visibility,
                 filters=request.filters,
                 layout_config=request.layout_config,
