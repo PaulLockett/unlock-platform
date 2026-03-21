@@ -714,13 +714,8 @@ def run_test() -> dict:
             if share_token:
                 page.goto(
                     f"{VERCEL_PREVIEW_URL}/v/{share_token}",
-                    wait_until="domcontentloaded",
+                    wait_until="load",
                 )
-                # Wait for hydration + Temporal workflow to complete.
-                # The view-dashboard.tsx shows a spinner while loading,
-                # then renders the view name. Wait for either the title
-                # or the footer (proves the page fully rendered).
-                page.wait_for_load_state("load", timeout=15000)
                 import contextlib
 
                 with contextlib.suppress(Exception):
