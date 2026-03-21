@@ -83,7 +83,7 @@ export async function PATCH(
 
     const user = await requireAuth();
 
-    // First retrieve the view to get its current state
+    // Read current view state via direct Redis
     const viewResult = await retrieveView(shareToken);
 
     if (!viewResult.success || !viewResult.view) {
