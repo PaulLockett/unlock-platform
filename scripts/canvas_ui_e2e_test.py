@@ -281,8 +281,13 @@ def run_test() -> dict:
             )
 
             # --- Step 6: Click "Create New View" ---
-            create_card = page.locator("text=Create New View")
-            create_card.wait_for(timeout=10000)
+            # Wait for view grid to finish loading (skeleton → cards)
+            # The CreateViewCard renders after SurveyConfigsWorkflow
+            # returns via Temporal, which can take 10-30s
+            create_card = page.locator(
+                "text=Create New View"
+            ).first
+            create_card.wait_for(state="visible", timeout=55000)
             create_card.click()
             step("Clicked Create New View")
 
