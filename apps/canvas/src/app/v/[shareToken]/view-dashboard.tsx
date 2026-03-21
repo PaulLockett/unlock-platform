@@ -5,8 +5,8 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import SideNav from "@/components/nav/side-nav";
 import PanelGrid from "@/components/dashboard/panel-grid";
+import { useView } from "@/hooks/use-view";
 import type {
-  ViewDefinition,
   Panel,
   LayoutConfig,
 } from "@/types/platform";
@@ -19,33 +19,11 @@ interface ViewDashboardProps {
 export default function ViewDashboard({
   shareToken,
 }: ViewDashboardProps) {
-  const [view, setView] = useState<ViewDefinition | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { view, isLoading, isError, errorMessage } = useView(shareToken);
   const [panelData, setPanelData] = useState<
     Record<string, Record<string, unknown>[]>
   >({});
   const [loadingPanels, setLoadingPanels] = useState<Set<string>>(new Set());
-
-  // Fetch view configuration
-  const fetchView = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/views/${shareToken}`);
-      const data = await res.json();
-
-      if (!data.success) {
-        setError(data.message || "Failed to load view");
-        return;
-      }
-
-      setView(data.view);
-    } catch {
-      setError("Failed to load view");
-    } finally {
-      setLoading(false);
-    }
-  }, [shareToken]);
 
   // Fetch data for each panel in parallel
   const fetchPanelData = useCallback(
@@ -90,10 +68,6 @@ export default function ViewDashboard({
     [shareToken],
   );
 
-  useEffect(() => {
-    fetchView();
-  }, [fetchView]);
-
   // When view loads, fetch panel data
   useEffect(() => {
     if (!view) return;
@@ -110,7 +84,7 @@ export default function ViewDashboard({
   const metricPanel = displayPanels.find((p) => p.chart_type === "metric");
   const metricValue = metricPanel ? panelData[metricPanel.id]?.[0] : null;
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-charcoal">
         <div className="w-8 h-8 border-2 border-coral/30 border-t-coral rounded-full animate-spin" />
@@ -118,11 +92,11 @@ export default function ViewDashboard({
     );
   }
 
-  if (error || !view) {
+  if (isError || !view) {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-charcoal gap-4">
         <div className="text-white/40 text-sm font-mono tracking-widest uppercase">
-          {error || "View not found"}
+          {errorMessage || "View not found"}
         </div>
         <Link
           href="/"

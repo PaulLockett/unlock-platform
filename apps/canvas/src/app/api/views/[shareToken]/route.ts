@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionUser, requireAuth, AuthError } from "@/lib/auth/session";
+import { retrieveView } from "@/lib/redis/views";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
 export const maxDuration = 60;
 
 /**
  * GET /api/views/[shareToken] — get view config + schema + permissions.
+ * Direct Upstash read — bypasses Temporal for fast reads.
  * Auth optional: public views are accessible without login.
  */
 export async function GET(
@@ -16,12 +18,7 @@ export async function GET(
   try {
     const { shareToken } = await params;
 
-    const client = await getTemporalClient();
-    const result = await client.workflow.execute("RetrieveViewWorkflow", {
-      taskQueue: TASK_QUEUES.DATA_MANAGER,
-      workflowId: `retrieve-view-${shareToken}-${Date.now()}`,
-      args: [{ share_token: shareToken }],
-    });
+    const result = await retrieveView(shareToken);
 
     if (!result.success) {
       const status = result.message?.includes("not found") ? 404 : 500;
@@ -40,7 +37,15 @@ export async function GET(
       }
     }
 
-    return NextResponse.json(result);
+    // Visibility-dependent caching
+    const cacheHeader =
+      view?.visibility === "public"
+        ? "public, max-age=120, stale-while-revalidate=300"
+        : "private, max-age=60, stale-while-revalidate=120";
+
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": cacheHeader },
+    });
   } catch (error) {
     console.error("GET /api/views/[shareToken] error:", error);
     return NextResponse.json(
@@ -59,7 +64,7 @@ const PatchBody = z.object({
 
 /**
  * PATCH /api/views/[shareToken] — update view config (panels, name, visibility).
- * Requires write+ permission.
+ * Requires write+ permission. Mutations stay on Temporal.
  */
 export async function PATCH(
   request: NextRequest,
@@ -79,12 +84,7 @@ export async function PATCH(
     const user = await requireAuth();
 
     // First retrieve the view to get its current state
-    const client = await getTemporalClient();
-    const viewResult = await client.workflow.execute("RetrieveViewWorkflow", {
-      taskQueue: TASK_QUEUES.DATA_MANAGER,
-      workflowId: `retrieve-for-patch-${shareToken}-${Date.now()}`,
-      args: [{ share_token: shareToken }],
-    });
+    const viewResult = await retrieveView(shareToken);
 
     if (!viewResult.success || !viewResult.view) {
       return NextResponse.json(
@@ -97,7 +97,7 @@ export async function PATCH(
     const view = viewResult.view;
     const isOwner = view.created_by === user.id;
     const hasWrite = viewResult.permissions?.some(
-      (p: { principal_id: string; permission: string }) =>
+      (p) =>
         p.principal_id === user.id &&
         (p.permission === "write" || p.permission === "admin"),
     );
@@ -109,7 +109,8 @@ export async function PATCH(
       );
     }
 
-    // Update via configure workflow (re-activate with updated fields)
+    // Update via configure workflow (mutations stay on Temporal)
+    const client = await getTemporalClient();
     const result = await client.workflow.execute("ConfigureWorkflow", {
       taskQueue: TASK_QUEUES.DATA_MANAGER,
       workflowId: `patch-view-${shareToken}-${Date.now()}`,
