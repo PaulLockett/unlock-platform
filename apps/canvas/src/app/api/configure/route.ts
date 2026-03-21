@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth, requireAdmin, AuthError } from "@/lib/auth/session";
 import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
 
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 const ConfigureBody = z.object({
   config_type: z.enum(["schema", "pipeline", "view"]),
@@ -26,6 +26,10 @@ const ConfigureBody = z.object({
 
 /**
  * POST /api/configure — create schema, pipeline, or view.
+ *
+ * Starts the ConfigureWorkflow asynchronously and returns the workflowId
+ * immediately. The frontend checks /api/workflow/[workflowId] for the result.
+ *
  * Schemas/pipelines require admin. Views require auth.
  */
 export async function POST(request: NextRequest) {
@@ -50,10 +54,13 @@ export async function POST(request: NextRequest) {
       user = await requireAuth();
     }
 
+    const workflowId = `configure-${parsed.data.config_type}-${Date.now()}`;
     const client = await getTemporalClient();
-    const result = await client.workflow.execute("ConfigureWorkflow", {
+
+    // Start workflow asynchronously — returns immediately
+    await client.workflow.start("ConfigureWorkflow", {
       taskQueue: TASK_QUEUES.DATA_MANAGER,
-      workflowId: `configure-${parsed.data.config_type}-${Date.now()}`,
+      workflowId,
       args: [
         {
           ...parsed.data,
@@ -62,11 +69,15 @@ export async function POST(request: NextRequest) {
       ],
     });
 
-    if (!result.success) {
-      return NextResponse.json(result, { status: 400 });
-    }
-
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Workflow started",
+        workflowId,
+        config_type: parsed.data.config_type,
+      },
+      { status: 202 },
+    );
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json(
