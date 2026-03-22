@@ -221,6 +221,15 @@ def run_test() -> dict:
         if not passed:
             raise _StepFailure(f"Step failed: {name} — {detail}")
 
+    def warn(name: str, *, passed: bool = True, detail: str = "") -> None:
+        """Like step(), but never aborts the test — logs as WARN on failure."""
+        elapsed = round(time.monotonic() - start, 1)
+        status = "PASS" if passed else "WARN"
+        steps.append(
+            {"name": name, "passed": passed, "detail": detail, "elapsed_s": elapsed}
+        )
+        print(f"  [{status}] {name}" + (f" ({detail})" if detail else ""))
+
     def build_result() -> dict:
         duration = round(time.monotonic() - start, 1)
         all_passed = bool(steps) and all(s["passed"] for s in steps)
@@ -445,7 +454,7 @@ def run_test() -> dict:
                     return { status: res.status, body: b };
                 }
             """)
-            step(
+            warn(
                 "Listed sources via API",
                 passed=list_result["status"] == 200,
                 detail=(
@@ -802,7 +811,7 @@ def run_test() -> dict:
                 query_msg = query_body.get(
                     "message", str(query_body)[:200]
                 )
-                step(
+                warn(
                     "Query API returns data",
                     passed=query_ok and record_count > 0,
                     detail=(
@@ -824,7 +833,7 @@ def run_test() -> dict:
                 has_table_data = page.locator(
                     "table tbody tr"
                 ).count() > 0
-                step(
+                warn(
                     "Chart data renders in panels",
                     passed=(
                         has_svg or has_table_data or not has_no_data
@@ -856,7 +865,7 @@ def run_test() -> dict:
                 """,
                     share_token,
                 )
-                step(
+                warn(
                     "Cleaned up test view",
                     passed=cleanup_result["status"] == 200,
                     detail=(
