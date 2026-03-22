@@ -10,7 +10,7 @@ interface ViewResponse {
 }
 
 const fetcher = async (url: string): Promise<ViewResponse> => {
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store" });
   const data = await res.json();
   if (!data.success) {
     const err = new Error(data.message || "Failed to load view");

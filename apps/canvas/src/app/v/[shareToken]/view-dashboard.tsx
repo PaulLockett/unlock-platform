@@ -303,7 +303,7 @@ export default function ViewDashboard({
         <div className="flex-1 overflow-y-auto no-scrollbar relative scroll-smooth">
           {/* Hero section */}
           <section className="min-h-[25vh] flex flex-col justify-end px-8 md:px-12 pb-8 border-b border-white/10 relative overflow-hidden">
-            <div className="absolute top-0 right-20 w-[1px] h-full bg-white/5" />
+            <div className="absolute top-0 right-20 w-px h-full bg-white/5" />
             <div className="flex items-end justify-between relative z-10">
               <div>
                 <h1 className="text-[clamp(3rem,8vw,8rem)] leading-[0.85] font-display text-sage uppercase tracking-tight">
