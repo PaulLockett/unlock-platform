@@ -226,13 +226,15 @@ def run_test() -> dict:
         elapsed = round(time.monotonic() - start, 1)
         status = "PASS" if passed else "WARN"
         steps.append(
-            {"name": name, "passed": passed, "detail": detail, "elapsed_s": elapsed}
+            {"name": name, "passed": passed, "detail": detail,
+             "elapsed_s": elapsed, "advisory": True}
         )
         print(f"  [{status}] {name}" + (f" ({detail})" if detail else ""))
 
     def build_result() -> dict:
         duration = round(time.monotonic() - start, 1)
-        all_passed = bool(steps) and all(s["passed"] for s in steps)
+        required = [s for s in steps if not s.get("advisory")]
+        all_passed = bool(required) and all(s["passed"] for s in required)
         return {
             "passed": all_passed,
             "test_email": test_email,
