@@ -847,7 +847,186 @@ def run_test() -> dict:
                     ),
                 )
 
-            # --- Flow 6: Cleanup — delete the test view ---
+            # --- Flow 6: Edit Mode — PATCH add/remove panel ---
+            if share_token:
+                # Add a 5th panel to the view via PATCH
+                add_panel_result = page.evaluate(
+                    """
+                    async (args) => {
+                        const { shareToken, existingPanels } = args;
+                        const newPanel = {
+                            id: 'e2e-added-panel',
+                            title: 'E2E Added Panel',
+                            chart_type: 'area',
+                            position: { x: 0, y: 2, w: 6, h: 1 },
+                            chart_config: {
+                                x_axis: 'date',
+                                y_axis: 'reach'
+                            },
+                            query_config: {}
+                        };
+                        const updatedPanels = [...existingPanels, newPanel];
+                        const res = await fetch('/api/views/' + shareToken, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                layout_config: {
+                                    grid_columns: 6,
+                                    panels: updatedPanels
+                                }
+                            })
+                        });
+                        const data = await res.json().catch(
+                            () => ({ error: 'non-JSON' })
+                        );
+                        return { status: res.status, body: data };
+                    }
+                """,
+                    {
+                        "shareToken": share_token,
+                        "existingPanels": [
+                            {
+                                "id": "reach-bar",
+                                "title": "Daily Reach",
+                                "chart_type": "bar",
+                                "position": {"x": 0, "y": 0, "w": 3, "h": 1},
+                                "chart_config": {
+                                    "x_axis": "date",
+                                    "y_axis": "reach",
+                                },
+                                "query_config": {},
+                            },
+                            {
+                                "id": "impressions-line",
+                                "title": "Impressions Over Time",
+                                "chart_type": "line",
+                                "position": {"x": 3, "y": 0, "w": 3, "h": 1},
+                                "chart_config": {
+                                    "x_axis": "date",
+                                    "y_axis": "impressions",
+                                },
+                                "query_config": {},
+                            },
+                            {
+                                "id": "total-reach",
+                                "title": "Total Reach",
+                                "chart_type": "metric",
+                                "position": {"x": 0, "y": 1, "w": 2, "h": 1},
+                                "chart_config": {
+                                    "value_field": "reach",
+                                    "aggregation": "sum",
+                                    "label": "Total Reach",
+                                },
+                                "query_config": {},
+                            },
+                            {
+                                "id": "data-table",
+                                "title": "Raw Data",
+                                "chart_type": "table",
+                                "position": {"x": 2, "y": 1, "w": 4, "h": 1},
+                                "chart_config": {
+                                    "columns": [
+                                        "date",
+                                        "account",
+                                        "reach",
+                                        "impressions",
+                                    ]
+                                },
+                                "query_config": {},
+                            },
+                        ],
+                    },
+                )
+                step(
+                    "PATCH added 5th panel",
+                    passed=add_panel_result["status"] == 200,
+                    detail=(
+                        f"status={add_panel_result['status']} "
+                        f"body={str(add_panel_result.get('body', {}))[:200]}"
+                    ),
+                )
+
+                # Verify GET returns 5 panels
+                get_after_add = page.evaluate(
+                    """
+                    async (shareToken) => {
+                        const res = await fetch('/api/views/' + shareToken);
+                        const data = await res.json().catch(
+                            () => ({ error: 'non-JSON' })
+                        );
+                        const panels = data?.view?.layout_config?.panels || [];
+                        return {
+                            status: res.status,
+                            panel_count: panels.length,
+                            panel_ids: panels.map(p => p.id)
+                        };
+                    }
+                """,
+                    share_token,
+                )
+                warn(
+                    "GET returns 5 panels after add",
+                    passed=get_after_add.get("panel_count", 0) == 5,
+                    detail=(
+                        f"count={get_after_add.get('panel_count')} "
+                        f"ids={get_after_add.get('panel_ids')}"
+                    ),
+                )
+
+                # Remove the added panel via PATCH (back to 4 panels)
+                remove_panel_result = page.evaluate(
+                    """
+                    async (args) => {
+                        const { shareToken, panelIds } = args;
+                        // Remove 'e2e-added-panel'
+                        const res = await fetch('/api/views/' + shareToken);
+                        const viewData = await res.json();
+                        const panels = (
+                            viewData?.view?.layout_config?.panels || []
+                        ).filter(p => p.id !== 'e2e-added-panel');
+                        const patchRes = await fetch(
+                            '/api/views/' + shareToken,
+                            {
+                                method: 'PATCH',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    layout_config: {
+                                        grid_columns: 6,
+                                        panels: panels
+                                    }
+                                })
+                            }
+                        );
+                        const patchData = await patchRes.json().catch(
+                            () => ({ error: 'non-JSON' })
+                        );
+                        return {
+                            status: patchRes.status,
+                            remaining_panels: panels.length,
+                            body: patchData
+                        };
+                    }
+                """,
+                    {
+                        "shareToken": share_token,
+                        "panelIds": get_after_add.get("panel_ids", []),
+                    },
+                )
+                warn(
+                    "PATCH removed panel (back to 4)",
+                    passed=(
+                        remove_panel_result["status"] == 200
+                        and remove_panel_result.get("remaining_panels") == 4
+                    ),
+                    detail=(
+                        f"status={remove_panel_result['status']} "
+                        f"remaining={remove_panel_result.get('remaining_panels')}"
+                    ),
+                )
+
+            # --- Flow 7: Cleanup — delete the test view ---
             if share_token:
                 # Deactivate by setting status to "deleted" via PATCH
                 # (the platform uses soft deletes via config update)

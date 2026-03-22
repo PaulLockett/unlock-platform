@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import {
   AreaChart,
   Area,
@@ -17,6 +18,7 @@ interface AreaChartPanelProps {
 }
 
 export default function AreaChartPanel({ panel, data }: AreaChartPanelProps) {
+  const gradientId = useId();
   const xKey = panel.chart_config.x_axis ?? "name";
   const yKey = panel.chart_config.y_axis ?? "value";
 
@@ -24,7 +26,7 @@ export default function AreaChartPanel({ panel, data }: AreaChartPanelProps) {
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
         <defs>
-          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="#ea6d58" stopOpacity={0.3} />
             <stop offset="95%" stopColor="#ea6d58" stopOpacity={0} />
           </linearGradient>
@@ -55,7 +57,7 @@ export default function AreaChartPanel({ panel, data }: AreaChartPanelProps) {
           type="monotone"
           dataKey={yKey}
           stroke="#ea6d58"
-          fill="url(#areaGrad)"
+          fill={`url(#${gradientId})`}
           strokeWidth={2}
         />
       </AreaChart>

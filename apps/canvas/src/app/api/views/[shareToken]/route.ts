@@ -25,7 +25,7 @@ export async function GET(
       return NextResponse.json(result, { status });
     }
 
-    // Check visibility: if not public, require auth
+    // Check visibility: if not public, require auth + permission
     const view = result.view;
     if (view?.visibility !== "public") {
       const user = await getSessionUser();
@@ -33,6 +33,20 @@ export async function GET(
         return NextResponse.json(
           { success: false, message: "Authentication required for this view" },
           { status: 401 },
+        );
+      }
+
+      // Verify user has access to this specific view
+      const isOwner = view?.created_by === user.id;
+      const hasGrant = result.permissions?.some(
+        (p) =>
+          p.principal_id === user.id &&
+          ["read", "write", "admin"].includes(p.permission),
+      );
+      if (!isOwner && !hasGrant && user.role !== "admin") {
+        return NextResponse.json(
+          { success: false, message: "Access denied" },
+          { status: 403 },
         );
       }
     }

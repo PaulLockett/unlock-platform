@@ -1,3 +1,4 @@
+import { createClient } from "@/lib/supabase/server";
 import ViewDashboard from "./view-dashboard";
 
 interface ViewPageProps {
@@ -10,5 +11,21 @@ export default async function ViewPage({ params, searchParams }: ViewPageProps) 
   const { edit } = await searchParams;
   const isEditMode = edit === "true";
 
-  return <ViewDashboard shareToken={shareToken} initialEditMode={isEditMode} />;
+  // Get current user for permission-gated edit button
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const userId = user?.id ?? null;
+  const isAdmin = (user?.app_metadata?.role as string) === "admin";
+
+  return (
+    <ViewDashboard
+      shareToken={shareToken}
+      initialEditMode={isEditMode}
+      userId={userId}
+      isAdmin={isAdmin}
+    />
+  );
 }
