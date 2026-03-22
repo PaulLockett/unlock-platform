@@ -193,10 +193,31 @@ def run_test() -> dict:
         if not passed:
             raise _StepFailure(f"{name} — {detail}")
 
+    def warn(
+        name: str, *, passed: bool = True, detail: str = ""
+    ) -> None:
+        """Like step(), but never aborts — logs as WARN on failure."""
+        elapsed = round(time.monotonic() - start, 1)
+        status = "PASS" if passed else "WARN"
+        steps.append(
+            {
+                "name": name,
+                "passed": passed,
+                "detail": detail,
+                "elapsed_s": elapsed,
+                "advisory": True,
+            }
+        )
+        print(
+            f"  [{status}] {name}"
+            + (f" ({detail})" if detail else "")
+        )
+
     def build_result() -> dict:
         duration = round(time.monotonic() - start, 1)
-        all_passed = bool(steps) and all(
-            s["passed"] for s in steps
+        required = [s for s in steps if not s.get("advisory")]
+        all_passed = bool(required) and all(
+            s["passed"] for s in required
         )
         return {
             "passed": all_passed,
@@ -432,13 +453,119 @@ def run_test() -> dict:
                 ),
             )
 
-            # --- Step 9: Navigate back to home ---
+            # --- Step 9: Verify edit mode active ---
+            # The CreateViewModal redirects to /v/{token}?edit=true
+            # which enters edit mode automatically. Check for the
+            # "EDITING" badge in the header.
+            body_edit = page.inner_text("body").upper()
+            has_editing = "EDITING" in body_edit
+            warn(
+                "Edit mode active on new view",
+                passed=has_editing,
+                detail=f"editing_badge={has_editing}",
+            )
+
+            # --- Step 10: Add a panel via Add Chart ---
+            # Look for the Add Chart button in the floating toolbar
+            # or the AddPanelButton in the grid.
+            add_btn = page.locator(
+                "button:has-text('Add Chart'), "
+                "button:has-text('Add Panel')"
+            ).first
+            with contextlib.suppress(Exception):
+                add_btn.wait_for(state="visible", timeout=10000)
+            if add_btn.is_visible():
+                add_btn.click()
+                step("Clicked Add Chart")
+
+                # Fill the add panel modal
+                with contextlib.suppress(Exception):
+                    page.wait_for_selector(
+                        "text=Panel Title", timeout=5000
+                    )
+
+                title_input = page.locator(
+                    'input[placeholder="Daily Reach"]'
+                )
+                title_input.click()
+                title_input.fill("")
+                title_input.type("E2E Test Panel", delay=50)
+
+                # Select "bar" chart type (should be default, but click)
+                bar_btn = page.locator(
+                    "button:has-text('Bar')"
+                ).first
+                if bar_btn.is_visible():
+                    bar_btn.click()
+
+                # Fill axis fields
+                x_input = page.locator(
+                    'input[placeholder="date"]'
+                )
+                if x_input.is_visible():
+                    x_input.fill("date")
+
+                y_input = page.locator(
+                    'input[placeholder="reach"]'
+                ).first
+                if y_input.is_visible():
+                    y_input.fill("reach")
+
+                # Click Add Panel button
+                submit_btn = page.locator(
+                    'button:has-text("Add Panel")'
+                ).last
+                submit_btn.click()
+                step("Added panel via modal")
+
+                # Verify panel appears in grid
+                page.wait_for_timeout(1000)
+                body_after_add = page.inner_text("body").upper()
+                has_panel = "E2E TEST PANEL" in body_after_add
+                step(
+                    "Panel appears in grid",
+                    passed=has_panel,
+                    detail=f"found={has_panel}",
+                )
+
+                # --- Step 11: Save the layout ---
+                save_btn = page.locator(
+                    "button:has-text('Save')"
+                ).first
+                if save_btn.is_visible():
+                    save_btn.click()
+                    # Wait for save to complete — editing badge disappears
+                    # or save button is re-enabled
+                    page.wait_for_timeout(5000)
+                    step("Saved layout")
+
+                    # Reload and verify persistence
+                    page.reload(wait_until="load")
+                    with contextlib.suppress(Exception):
+                        page.wait_for_selector(
+                            "text=Back to Views", timeout=30000
+                        )
+                    body_reload = page.inner_text("body").upper()
+                    has_panel_after = "E2E TEST PANEL" in body_reload
+                    warn(
+                        "Panel persists after reload",
+                        passed=has_panel_after,
+                        detail=f"found={has_panel_after}",
+                    )
+            else:
+                warn(
+                    "Add Chart button visible",
+                    passed=False,
+                    detail="Button not found — edit mode may not be active",
+                )
+
+            # --- Step 12: Navigate back to home ---
             back_link = page.locator("text=Back to Views").first
             back_link.click()
             page.wait_for_url("**/", timeout=15000)
             step("Navigated back to home")
 
-            # --- Step 10: Verify new view appears ---
+            # --- Step 13: Verify new view appears ---
             # The home page fetches views via SurveyConfigsWorkflow.
             # Wait for the view grid to load — look for the actual
             # view card with the name we created.

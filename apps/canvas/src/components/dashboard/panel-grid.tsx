@@ -23,10 +23,15 @@ export default function PanelGrid({
   onEditPanel,
   onAddPanel,
 }: PanelGridProps) {
-  if (!panels.length && !editMode) {
+  if (!panels.length) {
     return (
-      <div className="flex items-center justify-center py-32 text-white/20 text-sm font-mono tracking-widest">
-        NO PANELS — ENTER EDIT MODE TO ADD CHARTS
+      <div className="flex flex-col items-center justify-center py-32 gap-4">
+        <div className="text-white/20 text-sm font-mono tracking-widest">
+          {editMode
+            ? "NO PANELS YET — CLICK ADD CHART TO GET STARTED"
+            : "NO PANELS — ENTER EDIT MODE TO ADD CHARTS"}
+        </div>
+        {editMode && onAddPanel && <AddPanelButton onClick={onAddPanel} />}
       </div>
     );
   }

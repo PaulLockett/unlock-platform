@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth, AuthError } from "@/lib/auth/session";
 import { getTemporalClient } from "@/lib/temporal/client";
 
 export const maxDuration = 30;
@@ -20,6 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ workflowId: string }> },
 ) {
   try {
+    await requireAuth();
     const { workflowId } = await params;
     const client = await getTemporalClient();
     const handle = client.workflow.getHandle(workflowId);
@@ -46,6 +48,12 @@ export async function GET(
     // RUNNING or other transient states
     return NextResponse.json({ status });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { status: "ERROR", error: error.message },
+        { status: error.status },
+      );
+    }
     const err = error as Error;
     if (err.message?.includes("not found")) {
       return NextResponse.json(
