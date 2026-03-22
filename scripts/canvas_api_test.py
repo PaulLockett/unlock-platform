@@ -772,6 +772,96 @@ def run_test() -> dict:
                     ),
                 )
 
+                # --- Flow 5: Verify chart data renders ---
+                # Query data via API and check that panels show
+                # actual data (not just "NO DATA" placeholders).
+                query_result = page.evaluate(
+                    """
+                    async (shareToken) => {
+                        const res = await fetch('/api/query', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                share_token: shareToken,
+                                limit: 100,
+                                offset: 0
+                            })
+                        });
+                        const data = await res.json().catch(
+                            () => ({ error: 'non-JSON' })
+                        );
+                        return { status: res.status, body: data };
+                    }
+                """,
+                    share_token,
+                )
+                query_ok = query_result["status"] == 200
+                records = (
+                    query_result.get("body", {}).get("records", [])
+                )
+                record_count = len(records)
+                step(
+                    "Query API returns data",
+                    passed=query_ok and record_count > 0,
+                    detail=(
+                        f"status={query_result['status']} "
+                        f"records={record_count}"
+                    ),
+                )
+
+                # Wait for panel data to load, then check for
+                # actual rendered data (numbers/values, not "NO DATA")
+                page.wait_for_timeout(3000)
+                body_after = page.inner_text("body") or ""
+                body_after_upper = body_after.upper()
+                has_no_data = "NO DATA" in body_after_upper
+                # Check for SVG chart elements (Recharts renders SVGs)
+                has_svg = page.locator("svg.recharts-surface").count() > 0
+                # Check for table rows (data-table renders <tr>)
+                has_table_data = page.locator(
+                    "table tbody tr"
+                ).count() > 0
+                step(
+                    "Chart data renders in panels",
+                    passed=(
+                        has_svg or has_table_data or not has_no_data
+                    ),
+                    detail=(
+                        f"svg_charts={has_svg} "
+                        f"table_rows={has_table_data} "
+                        f"no_data={has_no_data}"
+                    ),
+                )
+
+            # --- Flow 6: Cleanup — delete the test view ---
+            if share_token:
+                # Deactivate by setting status to "deleted" via PATCH
+                # (the platform uses soft deletes via config update)
+                cleanup_result = page.evaluate(
+                    """
+                    async (shareToken) => {
+                        const res = await fetch('/api/views/' + shareToken, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ visibility: 'deleted' })
+                        });
+                        const data = await res.json().catch(
+                            () => ({ error: 'non-JSON' })
+                        );
+                        return { status: res.status, body: data };
+                    }
+                """,
+                    share_token,
+                )
+                step(
+                    "Cleaned up test view",
+                    passed=cleanup_result["status"] == 200,
+                    detail=(
+                        f"status={cleanup_result['status']} "
+                        f"body={str(cleanup_result.get('body', {}))[:100]}"
+                    ),
+                )
+
             # Screenshot
             page.screenshot(path=screenshot_path, full_page=True)
             browser.close()
