@@ -13,15 +13,16 @@ const mocks = vi.hoisted(() => {
   const mockGetSessionUser = vi.fn();
   const mockRequireAuth = vi.fn();
   const mockRequireAdmin = vi.fn();
+  const mockStart = vi.fn().mockResolvedValue({ signaledRunId: "run-1" });
   const mockExecute = vi.fn().mockResolvedValue({ success: true });
   const mockGetTemporalClient = vi.fn().mockResolvedValue({
-    workflow: { execute: mockExecute },
+    workflow: { execute: mockExecute, start: mockStart },
   });
   const mockUser = { id: "user-123", email: "testuser@example.com", role: "user" };
   const mockAdmin = { id: "admin-456", email: "admin@example.com", role: "admin" };
   return {
     MockAuthError, mockGetSessionUser, mockRequireAuth, mockRequireAdmin,
-    mockExecute, mockGetTemporalClient, mockUser, mockAdmin,
+    mockExecute, mockStart, mockGetTemporalClient, mockUser, mockAdmin,
   };
 });
 
@@ -44,8 +45,9 @@ describe("POST /api/configure", () => {
     mocks.mockRequireAuth.mockResolvedValue(mocks.mockUser);
     mocks.mockRequireAdmin.mockResolvedValue(mocks.mockAdmin);
     mocks.mockExecute.mockResolvedValue({ success: true });
+    mocks.mockStart.mockResolvedValue({ signaledRunId: "run-1" });
     mocks.mockGetTemporalClient.mockResolvedValue({
-      workflow: { execute: mocks.mockExecute },
+      workflow: { execute: mocks.mockExecute, start: mocks.mockStart },
     });
   });
 
@@ -95,8 +97,9 @@ describe("POST /api/configure", () => {
       config_type: "view",
       name: "my-view",
     });
-    const json = await expectJson(await POST(req), 201);
+    const json = await expectJson(await POST(req), 202);
     expect(json.success).toBe(true);
+    expect(json.workflowId).toBeDefined();
     expect(mocks.mockRequireAuth).toHaveBeenCalled();
     expect(mocks.mockRequireAdmin).not.toHaveBeenCalled();
   });
@@ -107,7 +110,7 @@ describe("POST /api/configure", () => {
       name: "my-view",
     });
     await POST(req);
-    expect(mocks.mockExecute).toHaveBeenCalledWith(
+    expect(mocks.mockStart).toHaveBeenCalledWith(
       "ConfigureWorkflow",
       expect.objectContaining({
         args: [expect.objectContaining({ created_by: "user-123" })],
@@ -115,26 +118,25 @@ describe("POST /api/configure", () => {
     );
   });
 
-  it("returns 201 on success", async () => {
+  it("returns 202 with workflowId on success", async () => {
     const req = buildRequest("POST", "/api/configure", {
       config_type: "schema",
       name: "new-schema",
       schema_type: "flat",
     });
-    const json = await expectJson(await POST(req), 201);
+    const json = await expectJson(await POST(req), 202);
     expect(json.success).toBe(true);
+    expect(json.workflowId).toMatch(/^configure-schema-/);
   });
 
-  it("returns 400 when workflow fails", async () => {
-    mocks.mockExecute.mockResolvedValue({
-      success: false,
-      message: "Validation failed",
-    });
+  it("returns 202 even for workflows that may fail later", async () => {
+    // Workflow failures are now reported via /api/workflow/[workflowId]
+    // The start endpoint always returns 202 if the workflow was started
     const req = buildRequest("POST", "/api/configure", {
       config_type: "view",
-      name: "bad-view",
+      name: "may-fail-view",
     });
-    const json = await expectJson(await POST(req), 400);
-    expect(json.success).toBe(false);
+    const json = await expectJson(await POST(req), 202);
+    expect(json.success).toBe(true);
   });
 });
