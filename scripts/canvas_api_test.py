@@ -796,16 +796,19 @@ def run_test() -> dict:
                     share_token,
                 )
                 query_ok = query_result["status"] == 200
-                records = (
-                    query_result.get("body", {}).get("records", [])
-                )
+                query_body = query_result.get("body", {})
+                records = query_body.get("records", [])
                 record_count = len(records)
+                query_msg = query_body.get(
+                    "message", str(query_body)[:200]
+                )
                 step(
                     "Query API returns data",
                     passed=query_ok and record_count > 0,
                     detail=(
                         f"status={query_result['status']} "
-                        f"records={record_count}"
+                        f"records={record_count} "
+                        f"msg={query_msg}"
                     ),
                 )
 
