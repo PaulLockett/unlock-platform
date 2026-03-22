@@ -54,7 +54,10 @@ from unlock_data_manager.workflows.configure import ConfigureWorkflow
 from unlock_data_manager.workflows.ingest import IngestWorkflow
 from unlock_data_manager.workflows.manage_source import ManageSourceWorkflow
 from unlock_data_manager.workflows.query import QueryWorkflow
+from unlock_data_manager.workflows.retrieve_view import RetrieveViewWorkflow
+from unlock_data_manager.workflows.revoke_access import RevokeAccessWorkflow
 from unlock_data_manager.workflows.share import ShareWorkflow
+from unlock_data_manager.workflows.survey_configs import SurveyConfigsWorkflow
 from unlock_llm_gateway.activities import hello_llm_assess
 from unlock_scheduler.activities import (
     cancel_harvest,
@@ -122,6 +125,9 @@ COMPONENTS: dict[str, ComponentConfig] = {
             ConfigureWorkflow,
             ShareWorkflow,
             ManageSourceWorkflow,
+            SurveyConfigsWorkflow,
+            RetrieveViewWorkflow,
+            RevokeAccessWorkflow,
         ],
     ),
     "source-access": ComponentConfig(

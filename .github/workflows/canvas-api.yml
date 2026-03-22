@@ -1,4 +1,4 @@
-name: Canvas E2E
+name: Canvas API
 
 # Exercises the full Canvas data lifecycle + view sharing flow via
 # Browserbase + Playwright against the Vercel preview deployment.
@@ -11,8 +11,8 @@ permissions:
   deployments: read
 
 jobs:
-  canvas-e2e:
-    name: Canvas — E2E lifecycle
+  canvas-api:
+    name: Canvas — API integration
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
         run: playwright install chromium
 
       # -- Run E2E test --
-      - name: Run Canvas E2E test
+      - name: Run Canvas API test
         if: steps.vercel.outputs.ready == 'true'
         id: test
         continue-on-error: true
@@ -81,22 +81,22 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           VERCEL_PROTECTION_BYPASS_TOKEN: ${{ secrets.VERCEL_PROTECTION_BYPASS_TOKEN }}
           TEST_ADMIN_EMAIL: ${{ secrets.TEST_ADMIN_EMAIL }}
-          RESULT_JSON: /tmp/canvas-e2e-result.json
-        run: python scripts/canvas_e2e_test.py
+          RESULT_JSON: /tmp/canvas-api-result.json
+        run: python scripts/canvas_api_test.py
 
       # -- Parse results --
       - name: Parse test results
         if: steps.vercel.outputs.ready == 'true'
         id: results
         run: |
-          if [ -f /tmp/canvas-e2e-result.json ]; then
-            RECORDING=$(python3 -c "import json; d=json.load(open('/tmp/canvas-e2e-result.json')); print(d.get('recording_url',''))")
-            DURATION=$(python3 -c "import json; d=json.load(open('/tmp/canvas-e2e-result.json')); print(d.get('duration_s','?'))")
-            TEST_EMAIL=$(python3 -c "import json; d=json.load(open('/tmp/canvas-e2e-result.json')); print(d.get('test_email',''))")
+          if [ -f /tmp/canvas-api-result.json ]; then
+            RECORDING=$(python3 -c "import json; d=json.load(open('/tmp/canvas-api-result.json')); print(d.get('recording_url',''))")
+            DURATION=$(python3 -c "import json; d=json.load(open('/tmp/canvas-api-result.json')); print(d.get('duration_s','?'))")
+            TEST_EMAIL=$(python3 -c "import json; d=json.load(open('/tmp/canvas-api-result.json')); print(d.get('test_email',''))")
 
             STEP_LINES=$(python3 -c "
           import json
-          d = json.load(open('/tmp/canvas-e2e-result.json'))
+          d = json.load(open('/tmp/canvas-api-result.json'))
           for i, s in enumerate(d.get('steps', []), 1):
               icon = '✅' if s['passed'] else '❌'
               detail = f\" ({s['detail']})\" if s.get('detail') else ''
@@ -123,9 +123,9 @@ jobs:
         if: steps.vercel.outputs.ready == 'true'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: canvas-e2e
+          header: canvas-api
           message: |
-            📊 **Canvas E2E — Data Lifecycle + Sharing**
+            📊 **Canvas API — API Integration**
 
             | | |
             |---|---|
@@ -146,17 +146,17 @@ jobs:
         if: steps.vercel.outputs.ready != 'true'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: canvas-e2e
+          header: canvas-api
           message: |
-            📊 **Canvas E2E — Data Lifecycle + Sharing**
+            📊 **Canvas API — API Integration**
 
             | | |
             |---|---|
             | **Status** | ⚠️ Skipped — Vercel preview not ready within 10 min |
 
       # -- Fail the check if test failed --
-      - name: Require Canvas E2E pass
+      - name: Require Canvas API pass
         if: steps.vercel.outputs.ready == 'true' && steps.test.outcome == 'failure'
         run: |
-          echo "Canvas E2E test failed — see PR comment for details."
+          echo "Canvas API test failed — see PR comment for details."
           exit 1

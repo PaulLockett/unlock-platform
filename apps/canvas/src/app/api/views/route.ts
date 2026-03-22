@@ -1,37 +1,26 @@
 import { NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth/session";
-import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
-
-export const maxDuration = 60;
+import { listActiveViews } from "@/lib/redis/views";
 
 /**
  * GET /api/views — list views accessible to the current user.
- * Returns all active views (survey_configs with config_type="view").
+ * Direct Upstash read — bypasses Temporal for fast reads.
  */
 export async function GET() {
   try {
     const user = await requireAuth();
 
-    const client = await getTemporalClient();
-
-    // Survey all active views
-    const result = await client.workflow.execute("SurveyConfigsWorkflow", {
-      taskQueue: TASK_QUEUES.DATA_MANAGER,
-      workflowId: `survey-views-${user.id}-${Date.now()}`,
-      args: [
-        {
-          config_type: "view",
-          status: "active",
-          created_by: user.role === "admin" ? null : user.id,
-        },
-      ],
-    });
+    const result = await listActiveViews(user.id, user.role);
 
     if (!result.success) {
       return NextResponse.json(result, { status: 500 });
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: {
+        "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+      },
+    });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json(

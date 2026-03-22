@@ -1,0 +1,150 @@
+name: API Perf
+
+# Measures API route latency against Vercel preview deployments.
+# Advisory only — posts results as PR comment, does NOT fail the check.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+  deployments: read
+
+jobs:
+  api-perf:
+    name: API — Route Latency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # -- Wait for Vercel preview deployment --
+      - name: Wait for Vercel preview
+        id: vercel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          echo "Waiting for Vercel preview deployment for $SHA..."
+
+          for i in $(seq 1 40); do
+            URL=$(gh api "repos/${{ github.repository }}/deployments?sha=$SHA&environment=Preview" \
+              --jq '.[0].id' 2>/dev/null || echo "")
+
+            if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+              DEPLOY_ID="$URL"
+              STATE=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOY_ID/statuses" \
+                --jq '.[0].state' 2>/dev/null || echo "")
+              ENV_URL=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOY_ID/statuses" \
+                --jq '.[0].environment_url' 2>/dev/null || echo "")
+
+              if [ "$STATE" = "success" ] && [ -n "$ENV_URL" ] && [ "$ENV_URL" != "null" ]; then
+                echo "Vercel preview is live: $ENV_URL"
+                echo "url=$ENV_URL" >> "$GITHUB_OUTPUT"
+                echo "ready=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "  Attempt $i: deployment $DEPLOY_ID state=$STATE"
+            else
+              echo "  Attempt $i: no deployment found yet"
+            fi
+
+            sleep 15
+          done
+
+          echo "Timed out waiting for Vercel preview (10 min)"
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+
+      # -- Python + dependencies --
+      - name: Set up Python
+        if: steps.vercel.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        if: steps.vercel.outputs.ready == 'true'
+        run: pip install httpx playwright
+
+      - name: Install Playwright Chromium
+        if: steps.vercel.outputs.ready == 'true'
+        run: playwright install chromium
+
+      # -- Run perf test --
+      - name: Run API perf test
+        if: steps.vercel.outputs.ready == 'true'
+        id: test
+        continue-on-error: true
+        env:
+          VERCEL_PREVIEW_URL: ${{ steps.vercel.outputs.url }}
+          BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+          BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VERCEL_PROTECTION_BYPASS_TOKEN: ${{ secrets.VERCEL_PROTECTION_BYPASS_TOKEN }}
+          TEST_ADMIN_EMAIL: ${{ secrets.TEST_ADMIN_EMAIL }}
+          RESULT_JSON: /tmp/api-perf-result.json
+        run: python scripts/api_perf_test.py
+
+      # -- Parse results into PR comment --
+      - name: Parse perf results
+        if: steps.vercel.outputs.ready == 'true'
+        id: results
+        run: |
+          if [ -f /tmp/api-perf-result.json ]; then
+            RECORDING=$(python3 -c "import json; d=json.load(open('/tmp/api-perf-result.json')); print(d.get('recording_url',''))")
+            DURATION=$(python3 -c "import json; d=json.load(open('/tmp/api-perf-result.json')); print(d.get('duration_s','?'))")
+
+            TABLE=$(python3 -c "
+          import json
+          d = json.load(open('/tmp/api-perf-result.json'))
+          for r in d.get('routes', []):
+              icon = '✅' if r['status'] == 'pass' else '❌'
+              thresh = f\"<{r['threshold_cold']}/<{r['threshold_warm']}\"
+              print(f\"| {r['route']} | {r['cold_ms']} | {r['warm_avg_ms']} | {thresh} | {icon} |\")
+          ")
+          else
+            RECORDING=""
+            DURATION="?"
+            TABLE="| (no results) | - | - | - | - |"
+          fi
+
+          echo "recording=$RECORDING" >> "$GITHUB_OUTPUT"
+          echo "duration=$DURATION" >> "$GITHUB_OUTPUT"
+          {
+            echo "table<<TABLE_EOF"
+            echo "$TABLE"
+            echo "TABLE_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # -- Sticky PR comment --
+      - name: Post or update PR comment
+        if: steps.vercel.outputs.ready == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: api-perf
+          message: |
+            ⚡ **API Route Latency**
+
+            | Route | Cold (ms) | Warm (ms) | Threshold | Status |
+            |-------|-----------|-----------|-----------|--------|
+            ${{ steps.results.outputs.table }}
+
+            | | |
+            |---|---|
+            | **Preview** | [${{ steps.vercel.outputs.url }}](${{ steps.vercel.outputs.url }}) |
+            | **Recording** | [Watch on Browserbase](${{ steps.results.outputs.recording }}) |
+            | **Duration** | ${{ steps.results.outputs.duration }}s |
+
+            > Advisory only — does not block merge.
+
+      # -- Comment if Vercel timed out --
+      - name: Post timeout comment
+        if: steps.vercel.outputs.ready != 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: api-perf
+          message: |
+            ⚡ **API Route Latency**
+
+            | | |
+            |---|---|
+            | **Status** | ⚠️ Skipped — Vercel preview not ready within 10 min |

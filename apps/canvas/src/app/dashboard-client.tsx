@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import SideNav, { type NavSection } from "@/components/nav/side-nav";
 import HeaderBar from "@/components/nav/header-bar";
 import ViewCard from "@/components/views/view-card";
 import CreateViewCard from "@/components/views/create-view-card";
 import CreateViewModal from "@/components/views/create-view-modal";
-import type { ViewDefinition } from "@/types/platform";
+import { useViews } from "@/hooks/use-views";
 
 interface DashboardClientProps {
   userId: string;
@@ -22,28 +22,8 @@ export default function DashboardClient({
   isAdmin,
 }: DashboardClientProps) {
   const [section, setSection] = useState<NavSection>("personal");
-  const [views, setViews] = useState<ViewDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-
-  const fetchViews = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/views");
-      if (res.ok) {
-        const data = await res.json();
-        setViews((data.items ?? []) as ViewDefinition[]);
-      }
-    } catch {
-      // silently fail — empty grid shown
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchViews();
-  }, [fetchViews]);
+  const { views, isLoading, refresh } = useViews();
 
   // Filter views by section
   const filtered = views.filter((view) => {
@@ -100,7 +80,7 @@ export default function DashboardClient({
 
           {/* View grid */}
           <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 border-l border-white/10 auto-rows-fr">
-            {loading ? (
+            {isLoading ? (
               // Loading skeleton cards
               Array.from({ length: 3 }).map((_, i) => (
                 <div
@@ -155,7 +135,7 @@ export default function DashboardClient({
         open={createModalOpen}
         onClose={() => {
           setCreateModalOpen(false);
-          fetchViews();
+          refresh();
         }}
       />
     </div>

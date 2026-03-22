@@ -22,7 +22,7 @@ def test_all_components_registered() -> None:
 def test_data_manager_has_workflows_no_activities() -> None:
     """The Data Manager is a workflow runner — it should have no activities."""
     dm = COMPONENTS["data-manager"]
-    assert len(dm.workflows) == 5
+    assert len(dm.workflows) == 8
     assert len(dm.activities) == 0
 
 

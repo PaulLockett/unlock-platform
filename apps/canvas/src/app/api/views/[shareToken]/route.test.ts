@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => {
   }
   const mockGetSessionUser = vi.fn();
   const mockRequireAuth = vi.fn();
-  const mockRequireAdmin = vi.fn();
+  const mockRetrieveView = vi.fn();
   const mockExecute = vi.fn().mockResolvedValue({ success: true });
   const mockGetTemporalClient = vi.fn().mockResolvedValue({
     workflow: { execute: mockExecute },
@@ -20,16 +20,19 @@ const mocks = vi.hoisted(() => {
   const mockUser = { id: "user-123", email: "testuser@example.com", role: "user" };
   const mockAdmin = { id: "admin-456", email: "admin@example.com", role: "admin" };
   return {
-    MockAuthError, mockGetSessionUser, mockRequireAuth, mockRequireAdmin,
-    mockExecute, mockGetTemporalClient, mockUser, mockAdmin,
+    MockAuthError, mockGetSessionUser, mockRequireAuth,
+    mockRetrieveView, mockExecute, mockGetTemporalClient,
+    mockUser, mockAdmin,
   };
 });
 
 vi.mock("@/lib/auth/session", () => ({
   getSessionUser: mocks.mockGetSessionUser,
   requireAuth: mocks.mockRequireAuth,
-  requireAdmin: mocks.mockRequireAdmin,
   AuthError: mocks.MockAuthError,
+}));
+vi.mock("@/lib/redis/views", () => ({
+  retrieveView: mocks.mockRetrieveView,
 }));
 vi.mock("@/lib/temporal/client", () => ({
   getTemporalClient: mocks.mockGetTemporalClient,
@@ -55,13 +58,10 @@ const baseView = {
 describe("GET /api/views/[shareToken]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.mockGetTemporalClient.mockResolvedValue({
-      workflow: { execute: mocks.mockExecute },
-    });
   });
 
   it("returns 404 when view not found", async () => {
-    mocks.mockExecute.mockResolvedValue({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: false,
       message: "View not found",
     });
@@ -75,7 +75,7 @@ describe("GET /api/views/[shareToken]", () => {
   });
 
   it("returns public view without auth", async () => {
-    mocks.mockExecute.mockResolvedValue({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, visibility: "public" },
     });
@@ -90,7 +90,7 @@ describe("GET /api/views/[shareToken]", () => {
   });
 
   it("returns 401 for private view when not authenticated", async () => {
-    mocks.mockExecute.mockResolvedValue({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, visibility: "private" },
     });
@@ -105,7 +105,7 @@ describe("GET /api/views/[shareToken]", () => {
   });
 
   it("returns private view when authenticated", async () => {
-    mocks.mockExecute.mockResolvedValue({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, visibility: "private" },
     });
@@ -118,22 +118,39 @@ describe("GET /api/views/[shareToken]", () => {
     expect(json.success).toBe(true);
   });
 
-  it("returns 200 on success", async () => {
-    mocks.mockExecute.mockResolvedValue({
+  it("returns 200 with public Cache-Control for public view", async () => {
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
-      view: { ...baseView },
+      view: { ...baseView, visibility: "public" },
     });
 
     const req = buildRequest("GET", "/api/views/tok-abc");
     const res = await GET(req, { params: makeParams("tok-abc") });
-    const json = await expectJson(res, 200);
+    await expectJson(res, 200);
 
-    expect(json.success).toBe(true);
-    expect(json.view).toBeDefined();
+    expect(res.headers.get("Cache-Control")).toBe(
+      "public, max-age=120, stale-while-revalidate=300",
+    );
   });
 
-  it("returns 500 when workflow errors", async () => {
-    mocks.mockExecute.mockResolvedValue({
+  it("returns private Cache-Control for private view", async () => {
+    mocks.mockRetrieveView.mockResolvedValue({
+      success: true,
+      view: { ...baseView, visibility: "private" },
+    });
+    mocks.mockGetSessionUser.mockResolvedValue(mocks.mockUser);
+
+    const req = buildRequest("GET", "/api/views/tok-abc");
+    const res = await GET(req, { params: makeParams("tok-abc") });
+    await expectJson(res, 200);
+
+    expect(res.headers.get("Cache-Control")).toBe(
+      "private, max-age=60, stale-while-revalidate=120",
+    );
+  });
+
+  it("returns 500 when read errors", async () => {
+    mocks.mockRetrieveView.mockResolvedValue({
       success: false,
       message: "Internal workflow failure",
     });
@@ -177,7 +194,7 @@ describe("PATCH /api/views/[shareToken]", () => {
 
   it("returns 404 when view not found", async () => {
     mocks.mockRequireAuth.mockResolvedValue(mocks.mockUser);
-    mocks.mockExecute.mockResolvedValueOnce({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: false,
       view: null,
     });
@@ -193,7 +210,7 @@ describe("PATCH /api/views/[shareToken]", () => {
   it("returns 403 when user lacks write permission", async () => {
     const otherUser = { id: "other-789", email: "other@example.com", role: "user" };
     mocks.mockRequireAuth.mockResolvedValue(otherUser);
-    mocks.mockExecute.mockResolvedValueOnce({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, created_by: "user-123" },
       permissions: [],
@@ -209,7 +226,7 @@ describe("PATCH /api/views/[shareToken]", () => {
 
   it("allows owner to patch", async () => {
     mocks.mockRequireAuth.mockResolvedValue(mocks.mockUser);
-    mocks.mockExecute.mockResolvedValueOnce({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, created_by: "user-123" },
       permissions: [],
@@ -221,13 +238,13 @@ describe("PATCH /api/views/[shareToken]", () => {
     const json = await expectJson(res, 200);
 
     expect(json.success).toBe(true);
-    expect(mocks.mockExecute).toHaveBeenCalledTimes(2);
+    expect(mocks.mockExecute).toHaveBeenCalledTimes(1);
   });
 
   it("allows user with write permission to patch", async () => {
     const writeUser = { id: "writer-999", email: "writer@example.com", role: "user" };
     mocks.mockRequireAuth.mockResolvedValue(writeUser);
-    mocks.mockExecute.mockResolvedValueOnce({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, created_by: "user-123" },
       permissions: [{ principal_id: "writer-999", permission: "write" }],
@@ -243,7 +260,7 @@ describe("PATCH /api/views/[shareToken]", () => {
 
   it("allows admin to patch any view", async () => {
     mocks.mockRequireAuth.mockResolvedValue(mocks.mockAdmin);
-    mocks.mockExecute.mockResolvedValueOnce({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, created_by: "user-123" },
       permissions: [],
@@ -259,7 +276,7 @@ describe("PATCH /api/views/[shareToken]", () => {
 
   it("returns 200 on successful update", async () => {
     mocks.mockRequireAuth.mockResolvedValue(mocks.mockUser);
-    mocks.mockExecute.mockResolvedValueOnce({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, created_by: "user-123" },
       permissions: [],
@@ -276,7 +293,7 @@ describe("PATCH /api/views/[shareToken]", () => {
 
   it("returns 400 when ConfigureWorkflow fails", async () => {
     mocks.mockRequireAuth.mockResolvedValue(mocks.mockUser);
-    mocks.mockExecute.mockResolvedValueOnce({
+    mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, created_by: "user-123" },
       permissions: [],

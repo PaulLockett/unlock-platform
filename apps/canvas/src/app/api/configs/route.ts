@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireAdmin, AuthError } from "@/lib/auth/session";
-import { getTemporalClient, TASK_QUEUES } from "@/lib/temporal/client";
-
-export const maxDuration = 60;
+import { surveyConfigs } from "@/lib/redis/configs";
 
 /**
  * GET /api/configs — list schemas or pipelines.
+ * Direct Upstash read — bypasses Temporal for fast reads.
  * Query params: type (schema|pipeline), status, name, limit, offset.
  * Schemas/pipelines require admin. Views use /api/views instead.
  */
@@ -24,26 +23,23 @@ export async function GET(request: NextRequest) {
       await requireAuth();
     }
 
-    const client = await getTemporalClient();
-    const result = await client.workflow.execute("SurveyConfigsWorkflow", {
-      taskQueue: TASK_QUEUES.DATA_MANAGER,
-      workflowId: `survey-${configType}-${Date.now()}`,
-      args: [
-        {
-          config_type: configType,
-          status: status ?? null,
-          name_pattern: name ?? null,
-          limit,
-          offset,
-        },
-      ],
+    const result = await surveyConfigs({
+      configType,
+      status: status ?? null,
+      namePattern: name ?? null,
+      limit,
+      offset,
     });
 
     if (!result.success) {
       return NextResponse.json(result, { status: 500 });
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: {
+        "Cache-Control": "private, max-age=60",
+      },
+    });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json(
