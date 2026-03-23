@@ -238,7 +238,7 @@ class TestRegistryIntegration:
         from unlock_workers.registry import COMPONENTS
 
         cfg = COMPONENTS["data-manager"]
-        assert len(cfg.workflows) == 8
+        assert len(cfg.workflows) == 4
 
     def test_registry_no_activities(self):
         """Data Manager runs workflows only — activities live on engine/RA workers."""
@@ -257,8 +257,4 @@ class TestRegistryIntegration:
             "QueryWorkflow",
             "ConfigureWorkflow",
             "ShareWorkflow",
-            "ManageSourceWorkflow",
-            "SurveyConfigsWorkflow",
-            "RetrieveViewWorkflow",
-            "RevokeAccessWorkflow",
         }

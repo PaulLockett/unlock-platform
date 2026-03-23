@@ -79,19 +79,6 @@ async def evaluate_access_decision(
     principal_id: str = decision_input.get("principal_id", "")
     required: str = decision_input.get("required_permission", "read")
 
-    # Public views: allow read access without explicit permission
-    view = decision_input.get("view")
-    if (
-        view
-        and view.get("visibility") == "public"
-        and required == "read"
-    ):
-        return {
-            "allowed": True,
-            "matched_permission": "read",
-            "reason": "public view allows anonymous read",
-        }
-
     if not principal_id:
         return {
             "allowed": False,
