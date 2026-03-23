@@ -634,3 +634,44 @@ async def hello_load_config(config_key: str) -> str:
     """
     activity.logger.info(f"Config Access: loading config '{config_key}'")
     return f"Config loaded: {config_key}"
+
+
+# ============================================================================
+# cache_source_records — store ingested data in Redis for fast query reads
+# ============================================================================
+
+
+@activity.defn
+async def cache_source_records(request: dict) -> dict:
+    """Cache raw ingested records in Redis for direct read by the Canvas query path.
+
+    Follows the CQRS pattern: writes go through Temporal (this activity),
+    reads go direct to Redis (Canvas /api/query route).
+
+    request: { source_key: str, records: list[dict] }
+    returns: { success: bool, message: str, cached_count: int }
+    """
+    source_key = request.get("source_key", "")
+    records = request.get("records", [])
+
+    if not source_key:
+        return {"success": False, "message": "Missing source_key", "cached_count": 0}
+
+    try:
+        client = get_client()
+        from unlock_config_access.keys import data_records_key
+
+        # Store as JSON array under data:records:{source_key}
+        await client.set(data_records_key(source_key), json.dumps(records))
+
+        activity.logger.info(
+            f"Cached {len(records)} records for source '{source_key}'"
+        )
+        return {
+            "success": True,
+            "message": f"Cached {len(records)} records",
+            "cached_count": len(records),
+        }
+    except Exception as exc:
+        activity.logger.error(f"Failed to cache records: {exc}")
+        return {"success": False, "message": str(exc), "cached_count": 0}
