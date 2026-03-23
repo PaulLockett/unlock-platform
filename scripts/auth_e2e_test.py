@@ -30,7 +30,6 @@ import os
 import re
 import sys
 import time
-from urllib.parse import urlparse
 
 import httpx
 from playwright.sync_api import sync_playwright
@@ -64,16 +63,28 @@ class _StepFailure(Exception):
 
 
 def create_browserbase_session() -> dict:
-    """Create a Browserbase cloud browser session via REST API."""
-    resp = httpx.post(
-        "https://api.browserbase.com/v1/sessions",
-        headers={
-            "X-BB-API-Key": BROWSERBASE_API_KEY,
-            "Content-Type": "application/json",
-        },
-        json={"projectId": BROWSERBASE_PROJECT_ID},
-        timeout=30,
-    )
+    """Create a Browserbase session with retry on 429 rate limits.
+
+    Auth E2E and Canvas E2E run in parallel on the same PR, so they
+    can hit the Browserbase concurrency/rate limit simultaneously.
+    """
+    for attempt in range(5):
+        resp = httpx.post(
+            "https://api.browserbase.com/v1/sessions",
+            headers={
+                "X-BB-API-Key": BROWSERBASE_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={"projectId": BROWSERBASE_PROJECT_ID},
+            timeout=30,
+        )
+        if resp.status_code == 429:
+            wait = 5 * (attempt + 1)
+            print(f"  Browserbase rate limited (429), retrying in {wait}s...")
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp.json()
     resp.raise_for_status()
     return resp.json()
 
@@ -291,14 +302,15 @@ def run_test() -> dict:
             step("Extracted magic link URL", detail=magic_link[:80] + "...")
 
             # --- Step 7: Navigate to magic link ---
-            page.goto(magic_link, wait_until="networkidle")
+            page.goto(magic_link, wait_until="domcontentloaded")
+            # Wait for redirect chain to land (not /login)
+            page.wait_for_url("**/", timeout=30000)
             step("Navigated to magic link", detail=page.url)
 
             # --- Step 8: Verify logged-in state ---
             # After the magic link flow, we should land on "/" and see either
             # the test email or a "Sign out" button — proving the session was
             # created.
-            page.wait_for_load_state("networkidle")
             body_text = page.text_content("body") or ""
             logged_in = (
                 test_email in body_text

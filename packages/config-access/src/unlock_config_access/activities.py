@@ -223,6 +223,7 @@ async def activate_view(request: ActivateViewRequest) -> ActivateViewResult:
             description=request.description,
             schema_id=request.schema_id,
             status="active",
+            visibility=request.visibility,
             share_token=share_token,
             filters=request.filters,
             layout_config=request.layout_config,
@@ -578,6 +579,18 @@ async def survey_configs(request: SurveyConfigsRequest) -> SurveyConfigsResult:
                 if item_json:
                     item_data = json.loads(item_json)
                     if pattern in item_data.get("name", "").lower():
+                        filtered.append(item_id)
+            all_ids = filtered
+            total_count = len(all_ids)
+
+        # Apply created_by filter if provided (mainly for views)
+        if request.created_by:
+            filtered = []
+            for item_id in all_ids:
+                item_json = await client.get(key_fn(item_id))
+                if item_json:
+                    item_data = json.loads(item_json)
+                    if item_data.get("created_by") == request.created_by:
                         filtered.append(item_id)
             all_ids = filtered
             total_count = len(all_ids)

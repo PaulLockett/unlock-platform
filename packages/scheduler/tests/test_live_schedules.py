@@ -103,17 +103,18 @@ class TestLiveScheduleLifecycle:
             assert desc3.is_paused is False
 
             # 7. List — should include our schedule. Temporal's visibility store
-            # has eventual consistency, so retry a few times with short delays.
+            # has eventual consistency (~2-5s in practice), so retry with backoff.
             import asyncio
 
             listed = None
-            for _attempt in range(5):
+            found = []
+            for attempt in range(8):
                 listed = await list_harvests(ListHarvestsRequest())
                 assert listed.success, f"list_harvests failed: {listed.message}"
                 found = [s for s in listed.schedules if s["schedule_id"] == schedule_id]
                 if found:
                     break
-                await asyncio.sleep(1)
+                await asyncio.sleep(min(2 ** attempt, 5))  # 1, 2, 4, 5, 5, ...
             assert found, f"Schedule {schedule_id} not found in list after retries"
 
             # 8. Register again — idempotent, should succeed
