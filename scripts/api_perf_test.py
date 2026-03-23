@@ -24,12 +24,12 @@ Usage:
 
 from __future__ import annotations
 
+import html as html_mod
 import json
 import os
 import re
 import sys
 import time
-import html as html_mod
 
 import httpx
 from playwright.sync_api import sync_playwright
@@ -218,19 +218,39 @@ def run_test() -> dict:
             page = context.pages[0] if context.pages else context.new_page()
             page.set_default_timeout(60_000)
 
-            # --- Auth ---
+            # --- Auth (with retry — Supabase rate-limits magic links) ---
             bypass_vercel(page, f"{VERCEL_PREVIEW_URL}/")
             page.goto(
                 f"{VERCEL_PREVIEW_URL}/login", wait_until="networkidle"
             )
             pre_send_email_id = get_latest_email_id(test_email)
 
-            email_input = page.locator('input[type="email"]')
-            email_input.fill(test_email)
-            page.locator('button[type="submit"]').click()
-            page.wait_for_selector("text=Check your email", timeout=15_000)
+            magic_link_sent = False
+            login_url = f"{VERCEL_PREVIEW_URL}/login"
+            for attempt in range(1, 4):
+                email_input = page.locator('input[type="email"]')
+                email_input.fill(test_email)
+                page.locator('button[type="submit"]').click()
+                try:
+                    page.wait_for_selector(
+                        "text=Check your email", timeout=15_000
+                    )
+                    magic_link_sent = True
+                    break
+                except Exception as exc:
+                    if attempt < 3:
+                        print(
+                            f"    Attempt {attempt}/3 failed: {exc}"
+                        )
+                        page.wait_for_timeout(10_000 * attempt)
+                        page.goto(
+                            login_url, wait_until="networkidle"
+                        )
 
-            print(f"  Polling for magic link email...")
+            if not magic_link_sent:
+                raise RuntimeError("Failed to send magic link after 3 attempts")
+
+            print("  Polling for magic link email...")
             email_data = poll_resend_for_email(
                 test_email, ignore_id=pre_send_email_id
             )
@@ -421,5 +441,4 @@ if __name__ == "__main__":
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2)
 
-    # Advisory only — always exit 0
-    sys.exit(0)
+    sys.exit(0 if result["passed"] else 1)

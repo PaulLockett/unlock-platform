@@ -1,7 +1,7 @@
 name: API Perf
 
 # Measures API route latency against Vercel preview deployments.
-# Advisory only — posts results as PR comment, does NOT fail the check.
+# Blocks merge if any route exceeds its latency threshold.
 on:
   pull_request:
     types: [opened, reopened, synchronize]
@@ -134,7 +134,7 @@ jobs:
             | **Recording** | [Watch on Browserbase](${{ steps.results.outputs.recording }}) |
             | **Duration** | ${{ steps.results.outputs.duration }}s |
 
-            > Advisory only — does not block merge.
+            > Blocks merge if any route exceeds its latency threshold.
 
       # -- Comment if Vercel timed out --
       - name: Post timeout comment
@@ -148,3 +148,10 @@ jobs:
             | | |
             |---|---|
             | **Status** | ⚠️ Skipped — Vercel preview not ready within 10 min |
+
+      # -- Fail the check if test failed --
+      - name: Require API perf pass
+        if: steps.vercel.outputs.ready == 'true' && steps.test.outcome == 'failure'
+        run: |
+          echo "API route latency test failed — see PR comment for details."
+          exit 1
