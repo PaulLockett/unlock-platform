@@ -97,9 +97,14 @@ class TestLiveScheduleLifecycle:
             ))
             assert resumed.success, f"resume_harvest failed: {resumed.message}"
 
-            # 6. Describe — should be unpaused
-            desc3 = await describe_harvest(DescribeHarvestRequest(source_name=source))
-            assert desc3.success
+            # 6. Describe — should be unpaused (retry for eventual consistency)
+            desc3 = None
+            for _retry in range(5):
+                desc3 = await describe_harvest(DescribeHarvestRequest(source_name=source))
+                if desc3.success:
+                    break
+                await asyncio.sleep(1)
+            assert desc3 and desc3.success, f"describe after resume failed: {desc3.message if desc3 else 'no result'}"
             assert desc3.is_paused is False
 
             # 7. List — should include our schedule. Temporal's visibility store
