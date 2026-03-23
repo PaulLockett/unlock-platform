@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error("POST /api/query error:", error);
+    console.error("POST /api/query error:", error instanceof Error ? error.message : error, error instanceof Error ? error.stack : "");
     return NextResponse.json(
       { success: false, message: "Internal server error" },
       { status: 500 },
