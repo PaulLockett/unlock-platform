@@ -314,8 +314,31 @@ def run_test() -> dict:
             )
             magic_link = extract_magic_link(html_body)
             page.goto(magic_link, wait_until="domcontentloaded")
-            page.wait_for_url("**/", timeout=30000)
-            step("Logged in via magic link", detail=page.url)
+
+            # Wait for redirect to home — retry if stuck on /login
+            logged_in = False
+            for _nav_attempt in range(3):
+                try:
+                    page.wait_for_url(
+                        "**/", timeout=15000
+                    )
+                    # Verify we're NOT on /login
+                    if "/login" not in page.url:
+                        logged_in = True
+                        break
+                except Exception:
+                    pass
+                # Still on /login — reload home
+                page.goto(
+                    f"{VERCEL_PREVIEW_URL}/",
+                    wait_until="domcontentloaded",
+                )
+
+            step(
+                "Logged in via magic link",
+                passed=logged_in,
+                detail=page.url,
+            )
 
             # --- Step 5: Dashboard home loads ---
             # Wait for the page to hydrate and show real content

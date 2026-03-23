@@ -259,7 +259,24 @@ def run_test() -> dict:
             )
             magic_link = extract_magic_link(html_body)
             page.goto(magic_link, wait_until="domcontentloaded")
-            page.wait_for_url("**/", timeout=30_000)
+
+            # Wait for redirect to home — retry if stuck on /login
+            for _nav_attempt in range(3):
+                try:
+                    page.wait_for_url("**/", timeout=15_000)
+                    if "/login" not in page.url:
+                        break
+                except Exception:
+                    pass
+                page.goto(
+                    f"{VERCEL_PREVIEW_URL}/",
+                    wait_until="domcontentloaded",
+                )
+
+            if "/login" in page.url:
+                raise RuntimeError(
+                    f"Auth failed — stuck on login after 3 attempts: {page.url}"
+                )
             print("  Authenticated successfully")
 
             # --- Discover a share token for single-view tests ---
