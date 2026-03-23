@@ -552,6 +552,73 @@ def run_test() -> dict:
                         passed=has_panel_after,
                         detail=f"found={has_panel_after}",
                     )
+                # --- Step: Open inline panel editor ---
+                # Re-enter edit mode for the editor test
+                edit_btn = page.locator(
+                    "button:has-text('Edit')"
+                ).first
+                with contextlib.suppress(Exception):
+                    edit_btn.wait_for(state="visible", timeout=5000)
+                if edit_btn.is_visible():
+                    edit_btn.click()
+                    page.wait_for_timeout(1000)
+
+                    # Click pencil icon on the panel to open inline editor
+                    pencil_btn = page.locator(
+                        "[data-testid='panel-edit-btn'], "
+                        "button:has(svg.lucide-pencil)"
+                    ).first
+                    with contextlib.suppress(Exception):
+                        pencil_btn.wait_for(
+                            state="visible", timeout=5000
+                        )
+
+                    if pencil_btn.is_visible():
+                        pencil_btn.click()
+                        page.wait_for_timeout(1000)
+
+                        body_editor = page.inner_text("body").upper()
+                        has_editor = (
+                            "EDITING PANEL" in body_editor
+                            or "APPLY CHANGES" in body_editor
+                            or "LIVE PREVIEW" in body_editor
+                        )
+                        warn(
+                            "Inline panel editor opened",
+                            passed=has_editor,
+                            detail=f"editing_panel={has_editor}",
+                        )
+
+                        # Check for live preview with real data
+                        has_svg = (
+                            page.locator(
+                                "svg.recharts-surface"
+                            ).count()
+                            > 0
+                        )
+                        warn(
+                            "Live preview shows chart data",
+                            passed=has_svg,
+                            detail=f"svg_charts={has_svg}",
+                        )
+
+                        # Click Apply Changes
+                        apply_btn = page.locator(
+                            "button:has-text('Apply')"
+                        ).first
+                        if apply_btn.is_visible():
+                            apply_btn.click()
+                            page.wait_for_timeout(1000)
+                            warn(
+                                "Applied panel editor changes",
+                                passed=True,
+                            )
+                    else:
+                        warn(
+                            "Pencil edit button visible",
+                            passed=False,
+                            detail="Pencil button not found on panel",
+                        )
             else:
                 warn(
                     "Add Chart button visible",
@@ -559,7 +626,7 @@ def run_test() -> dict:
                     detail="Button not found — edit mode may not be active",
                 )
 
-            # --- Step 12: Navigate back to home ---
+            # --- Step: Navigate back to home ---
             back_link = page.locator("text=Back to Views").first
             back_link.click()
             page.wait_for_url("**/", timeout=15000)

@@ -7,8 +7,9 @@ import SideNav from "@/components/nav/side-nav";
 import PanelGrid from "@/components/dashboard/panel-grid";
 import EditToolbar from "@/components/dashboard/edit-toolbar";
 import AddPanelModal from "@/components/dashboard/add-panel-modal";
+import PanelEditor from "@/components/dashboard/panel-editor";
 import { useView } from "@/hooks/use-view";
-import type { Panel, LayoutConfig } from "@/types/platform";
+import type { Panel, LayoutConfig, SchemaDefinition } from "@/types/platform";
 
 interface ViewDashboardProps {
   shareToken: string;
@@ -23,7 +24,7 @@ export default function ViewDashboard({
   userId,
   isAdmin = false,
 }: ViewDashboardProps) {
-  const { view, permissions, isLoading, isError, errorMessage, refresh } =
+  const { view, schema, permissions, isLoading, isError, errorMessage, refresh } =
     useView(shareToken);
 
   // Edit mode state
@@ -33,6 +34,7 @@ export default function ViewDashboard({
   const [saveError, setSaveError] = useState("");
   const [addPanelModalOpen, setAddPanelModalOpen] = useState(false);
   const [editingPanel, setEditingPanel] = useState<Panel | undefined>();
+  const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
 
   // Panel data for rendering charts
   const [panelData, setPanelData] = useState<
@@ -147,13 +149,9 @@ export default function ViewDashboard({
 
   const handleEditPanel = useCallback(
     (panelId: string) => {
-      const panel = editPanels.find((p) => p.id === panelId);
-      if (panel) {
-        setEditingPanel(panel);
-        setAddPanelModalOpen(true);
-      }
+      setEditingPanelId(panelId);
     },
-    [editPanels],
+    [],
   );
 
   const handleUpdatePanel = useCallback((updatedPanel: Panel) => {
@@ -207,8 +205,9 @@ export default function ViewDashboard({
   const metricPanel = displayPanels.find((p) => p.chart_type === "metric");
   const metricValue = metricPanel ? panelData[metricPanel.id]?.[0] : null;
 
-  // Schema fields for the add panel modal (populated in Phase 5 with schema introspection)
-  const schemaFields: string[] = [];
+  // Extract schema fields for editor dropdowns
+  const schemaFields: string[] =
+    (schema as SchemaDefinition | null)?.fields?.map((f) => f.target_field).filter(Boolean) ?? [];
 
   if (isLoading) {
     return (
@@ -378,7 +377,7 @@ export default function ViewDashboard({
         )}
       </main>
 
-      {/* Add/Edit Panel Modal — key forces remount to reset form state */}
+      {/* Add Panel Modal — for creating NEW panels */}
       {addPanelModalOpen && (
         <AddPanelModal
           key={editingPanel?.id ?? "new"}
@@ -399,6 +398,26 @@ export default function ViewDashboard({
           schemaFields={schemaFields}
         />
       )}
+
+      {/* Inline Panel Editor — for editing EXISTING panels */}
+      {editingPanelId && (() => {
+        const editPanel = editPanels.find((p) => p.id === editingPanelId);
+        if (!editPanel) return null;
+        return (
+          <PanelEditor
+            key={editingPanelId}
+            panel={editPanel}
+            panelData={panelData[editingPanelId] ?? []}
+            shareToken={shareToken}
+            schemaFields={schemaFields}
+            onApply={(updatedPanel) => {
+              handleUpdatePanel(updatedPanel);
+              setEditingPanelId(null);
+            }}
+            onCancel={() => setEditingPanelId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

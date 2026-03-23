@@ -40,12 +40,57 @@ const WIDTH_OPTIONS = [
   { label: "Large", w: 6 },
 ];
 
+function FieldInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  schemaFields: fields,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  schemaFields: string[];
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+        {label}
+      </label>
+      {fields.length > 0 ? (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors appearance-none"
+        >
+          <option value="">— Select field —</option>
+          {fields.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
+        />
+      )}
+    </div>
+  );
+}
+
 export default function AddPanelModal({
   open,
   onClose,
   onAdd,
   existingPanel,
   existingPanels = [],
+  schemaFields = [],
 }: AddPanelModalProps) {
   const isEditing = !!existingPanel;
 
@@ -194,47 +239,32 @@ export default function AddPanelModal({
             </div>
           </div>
 
-          {/* Axis fields — shown for non-metric types */}
+          {/* Axis fields — dropdown when schema fields available, text fallback */}
           {chartType !== "metric" && chartType !== "pie" ? (
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
-                  X-Axis Field
-                </label>
-                <input
-                  type="text"
-                  value={xAxis}
-                  onChange={(e) => setXAxis(e.target.value)}
-                  placeholder="date"
-                  className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
-                  Y-Axis Field
-                </label>
-                <input
-                  type="text"
-                  value={yAxis}
-                  onChange={(e) => setYAxis(e.target.value)}
-                  placeholder="reach"
-                  className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
-                />
-              </div>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
-                Value Field
-              </label>
-              <input
-                type="text"
+              <FieldInput
+                label="X-Axis Field"
+                value={xAxis}
+                onChange={setXAxis}
+                placeholder="date"
+                schemaFields={schemaFields}
+              />
+              <FieldInput
+                label="Y-Axis Field"
                 value={yAxis}
-                onChange={(e) => setYAxis(e.target.value)}
+                onChange={setYAxis}
                 placeholder="reach"
-                className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
+                schemaFields={schemaFields}
               />
             </div>
+          ) : (
+            <FieldInput
+              label="Value Field"
+              value={yAxis}
+              onChange={setYAxis}
+              placeholder="reach"
+              schemaFields={schemaFields}
+            />
           )}
 
           {/* Width selector */}
