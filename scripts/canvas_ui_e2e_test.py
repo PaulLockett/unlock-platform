@@ -557,12 +557,26 @@ def run_test() -> dict:
                 ).first
                 if save_btn.is_visible():
                     save_btn.click()
-                    # Wait for save to complete — editing badge disappears
-                    # or save button is re-enabled
-                    page.wait_for_timeout(5000)
-                    step("Saved layout")
 
-                    # Reload and verify persistence
+                    # Save triggers PATCH → ConfigureWorkflow. If the
+                    # backend creates a new view (old workers), the
+                    # frontend redirects to the new share_token URL.
+                    # Wait for either:
+                    #  a) URL changes (redirect to new view)
+                    #  b) Edit mode exits (save completed in place)
+                    pre_save_url = page.url
+                    page.wait_for_timeout(8000)
+                    post_save_url = page.url
+
+                    if post_save_url != pre_save_url:
+                        step(
+                            "Saved layout (redirected to new view)",
+                            detail=f"new_url={post_save_url}",
+                        )
+                    else:
+                        step("Saved layout")
+
+                    # Reload and verify persistence at the CURRENT url
                     page.reload(wait_until="load")
                     with contextlib.suppress(Exception):
                         page.wait_for_selector(
@@ -570,10 +584,10 @@ def run_test() -> dict:
                         )
                     body_reload = page.inner_text("body").upper()
                     has_panel_after = "E2E TEST PANEL" in body_reload
-                    warn(
+                    step(
                         "Panel persists after reload",
                         passed=has_panel_after,
-                        detail=f"found={has_panel_after}",
+                        detail=f"found={has_panel_after} url={page.url}",
                     )
 
                 # --- Step 12: Verify chart renders real data ---

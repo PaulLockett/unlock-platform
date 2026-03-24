@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Pencil, Save, X, Loader2 } from "lucide-react";
 import SideNav from "@/components/nav/side-nav";
 import PanelGrid from "@/components/dashboard/panel-grid";
@@ -24,6 +25,7 @@ export default function ViewDashboard({
   userId,
   isAdmin = false,
 }: ViewDashboardProps) {
+  const router = useRouter();
   const { view, schema, permissions, isLoading, isError, errorMessage, refresh } =
     useView(shareToken);
 
@@ -197,6 +199,16 @@ export default function ViewDashboard({
         setSaveError(data.message || "Save failed");
         return;
       }
+
+      // If the backend returned a different share_token (old workers create
+      // a new view instead of updating), redirect to the new URL so the
+      // saved panels are visible.
+      const newToken = data.share_token;
+      if (newToken && newToken !== shareToken) {
+        router.push(`/v/${newToken}`);
+        return;
+      }
+
       await refresh();
       setEditMode(false);
     } catch (err) {
@@ -204,7 +216,7 @@ export default function ViewDashboard({
     } finally {
       setIsSaving(false);
     }
-  }, [shareToken, editPanels, refresh]);
+  }, [shareToken, editPanels, refresh, router]);
 
   // Discard changes
   const handleDiscard = useCallback(() => {
