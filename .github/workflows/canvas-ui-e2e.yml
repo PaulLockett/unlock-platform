@@ -6,6 +6,12 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+# Only one E2E run per branch at a time — prevents Supabase rate limits
+# when multiple PRs share the same head branch.
+concurrency:
+  group: canvas-ui-e2e-${{ github.head_ref }}
+  cancel-in-progress: true
+
 permissions:
   pull-requests: write
   deployments: read
