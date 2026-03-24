@@ -214,8 +214,13 @@ async def activate_view(request: ActivateViewRequest) -> ActivateViewResult:
                 message=f"Schema not found: {request.schema_id}",
             )
 
-        view_id = str(uuid.uuid4())
-        share_token = str(uuid.uuid4())
+        # Update existing view or create new one
+        if request.view_id and request.share_token:
+            view_id = request.view_id
+            share_token = request.share_token
+        else:
+            view_id = str(uuid.uuid4())
+            share_token = str(uuid.uuid4())
 
         view = ViewDefinition(
             id=view_id,

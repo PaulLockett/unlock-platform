@@ -124,6 +124,8 @@ export async function PATCH(
     }
 
     // Update via configure workflow (mutations stay on Temporal)
+    // Pass existing view_id and share_token so activate_view updates
+    // the existing view instead of creating a new one.
     const client = await getTemporalClient();
     const result = await client.workflow.execute("ConfigureWorkflow", {
       taskQueue: TASK_QUEUES.DATA_MANAGER,
@@ -141,6 +143,8 @@ export async function PATCH(
           layout_config: parsed.data.layout_config ?? view.layout_config ?? {},
           visibility: parsed.data.visibility ?? view.visibility ?? "public",
           created_by: view.created_by ?? user.id,
+          view_id: view.id,
+          share_token: shareToken,
         },
       ],
     });
