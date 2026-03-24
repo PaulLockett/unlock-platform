@@ -669,10 +669,36 @@ def run_test() -> dict:
                 )
 
                 if has_chart:
-                    # Verify chart has actual bar rectangles (not empty)
-                    bar_count = page.locator(
-                        "svg.recharts-surface .recharts-bar-rectangle rect"
-                    ).count()
+                    # Wait for data to load and bars to render.
+                    # Recharts 3.x renders bars as <rect> inside the SVG.
+                    # Try multiple selectors to handle class name changes.
+                    page.wait_for_timeout(3000)  # data fetch
+
+                    bar_count = page.evaluate("""
+                        () => {
+                            const svg = document.querySelector(
+                                'svg.recharts-surface'
+                            );
+                            if (!svg) return 0;
+                            // Recharts 3.x: rects inside bar groups
+                            const rects = svg.querySelectorAll('rect');
+                            // Filter out axis/grid rects — bars have
+                            // height > 0 and are inside a g element
+                            let bars = 0;
+                            for (const r of rects) {
+                                const h = parseFloat(
+                                    r.getAttribute('height') || '0'
+                                );
+                                const w = parseFloat(
+                                    r.getAttribute('width') || '0'
+                                );
+                                // Bars: width > 1 and height > 1
+                                // (excludes CartesianGrid lines)
+                                if (h > 1 && w > 1) bars++;
+                            }
+                            return bars;
+                        }
+                    """)
                     step(
                         "Chart contains data bars",
                         passed=bar_count > 0,
