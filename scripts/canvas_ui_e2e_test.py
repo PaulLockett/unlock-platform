@@ -575,7 +575,116 @@ def run_test() -> dict:
                         passed=has_panel_after,
                         detail=f"found={has_panel_after}",
                     )
-                # --- Step: Open inline panel editor ---
+
+                # --- Step 12: Verify chart renders real data ---
+                # The panel should now show a bar chart with Meta Ads data.
+                # Wait for the chart to render with actual data from Redis.
+                # Known data: 10 rows with date/reach/impressions values.
+                # Key values: reach includes 19954, 17105, 14216, etc.
+
+                # Wait for chart SVG to appear (data fetch + render)
+                chart_svg = page.locator("svg.recharts-surface").first
+                with contextlib.suppress(Exception):
+                    chart_svg.wait_for(state="visible", timeout=15000)
+
+                has_chart = chart_svg.is_visible()
+                step(
+                    "Chart SVG rendered in panel",
+                    passed=has_chart,
+                    detail=f"svg_visible={has_chart}",
+                )
+
+                if has_chart:
+                    # Verify chart has actual bar rectangles (not empty)
+                    bar_count = page.locator(
+                        "svg.recharts-surface .recharts-bar-rectangle rect"
+                    ).count()
+                    step(
+                        "Chart contains data bars",
+                        passed=bar_count > 0,
+                        detail=f"bar_count={bar_count}",
+                    )
+
+                    # Verify axis ticks contain date strings from our data.
+                    # Recharts renders axis labels as <text> in the SVG.
+                    # Known dates: 2026-03-09 through 2026-03-18.
+                    chart_text = chart_svg.inner_text()
+                    # Also get the full SVG markup to check for tick values
+                    chart_html = chart_svg.evaluate(
+                        "el => el.outerHTML"
+                    )
+
+                    # Check for any of our known date values in axis ticks
+                    known_dates = [
+                        "2026-03-16", "2026-03-17", "2026-03-15",
+                        "2026-03-12", "2026-03-14", "2026-03-13",
+                    ]
+                    found_dates = [
+                        d for d in known_dates
+                        if d in chart_html or d in chart_text
+                    ]
+                    step(
+                        "Chart x-axis shows real date values",
+                        passed=len(found_dates) > 0,
+                        detail=f"found_dates={found_dates}",
+                    )
+
+                    # Check the /api/query response directly to confirm
+                    # data pipeline returns records
+                    query_resp = page.evaluate("""
+                        async () => {
+                            try {
+                                const r = await fetch('/api/query', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({
+                                        share_token: window.location.pathname.split('/v/')[1],
+                                        limit: 100, offset: 0
+                                    })
+                                });
+                                const d = await r.json();
+                                return {
+                                    success: d.success,
+                                    total_count: d.total_count || 0,
+                                    first_record: d.records ? d.records[0] : null,
+                                    record_count: d.records ? d.records.length : 0,
+                                    has_reach: d.records ? d.records.some(r => r.reach > 0) : false,
+                                };
+                            } catch(e) {
+                                return {success: false, error: String(e)};
+                            }
+                        }
+                    """)
+                    query_ok = query_resp.get("success", False)
+                    rec_count = query_resp.get("record_count", 0)
+                    has_reach = query_resp.get("has_reach", False)
+                    first_rec = query_resp.get("first_record")
+                    step(
+                        "API /query returns Meta Ads records",
+                        passed=query_ok and rec_count > 0,
+                        detail=(
+                            f"success={query_ok} "
+                            f"records={rec_count} "
+                            f"has_reach={has_reach} "
+                            f"first={json.dumps(first_rec) if first_rec else 'null'}"
+                        ),
+                    )
+
+                    # Verify specific known values appear in records
+                    if query_ok and rec_count > 0 and has_reach:
+                        step(
+                            "Data pipeline delivers reach values to frontend",
+                            passed=True,
+                            detail=f"Confirmed {rec_count} records with reach field > 0",
+                        )
+                    elif query_ok and rec_count > 0:
+                        warn(
+                            "Records returned but reach field not found",
+                            passed=False,
+                            detail=f"keys={list(first_rec.keys()) if first_rec else 'none'}",
+                        )
+
+                # --- Step 13: Open inline panel editor ---
                 # Re-enter edit mode for the editor test
                 edit_btn = page.locator(
                     "button:has-text('Edit')"
@@ -598,7 +707,7 @@ def run_test() -> dict:
 
                     if pencil_btn.is_visible():
                         pencil_btn.click()
-                        page.wait_for_timeout(1000)
+                        page.wait_for_timeout(2000)
 
                         body_editor = page.inner_text("body").upper()
                         has_editor = (
@@ -613,17 +722,74 @@ def run_test() -> dict:
                         )
 
                         # Check for live preview with real data
-                        has_svg = (
-                            page.locator(
-                                "svg.recharts-surface"
-                            ).count()
-                            > 0
+                        # The editor has a right pane with a ChartRenderer
+                        editor_svg = page.locator(
+                            "svg.recharts-surface"
                         )
+                        has_svg = editor_svg.count() > 0
                         warn(
-                            "Live preview shows chart data",
+                            "Live preview shows chart SVG",
                             passed=has_svg,
-                            detail=f"svg_charts={has_svg}",
+                            detail=f"svg_count={editor_svg.count()}",
                         )
+
+                        # Verify the editor detected fields from data
+                        # The Axes tab should show field dropdowns populated
+                        # from schema or auto-detected fields
+                        axes_tab = page.locator(
+                            "button:has-text('Axes')"
+                        ).first
+                        if axes_tab.is_visible():
+                            axes_tab.click()
+                            page.wait_for_timeout(500)
+                            # Check for "fields detected" indicator
+                            editor_body = page.inner_text("body")
+                            has_fields = (
+                                "fields detected" in editor_body.lower()
+                                or "select field" in editor_body.lower()
+                            )
+                            warn(
+                                "Panel editor shows field dropdowns",
+                                passed=has_fields,
+                                detail=f"has_field_ui={has_fields}",
+                            )
+
+                        # Check the Data tab for source selector
+                        data_tab = page.locator(
+                            "button:has-text('Data')"
+                        ).first
+                        if data_tab.is_visible():
+                            data_tab.click()
+                            page.wait_for_timeout(500)
+                            editor_body = page.inner_text("body")
+                            has_source = (
+                                "data source" in editor_body.lower()
+                                or "auto-detect" in editor_body.lower()
+                                or "time range" in editor_body.lower()
+                            )
+                            warn(
+                                "Panel editor shows data source + time range controls",
+                                passed=has_source,
+                                detail=f"has_data_controls={has_source}",
+                            )
+
+                        # Check the Transform tab exists
+                        transform_tab = page.locator(
+                            "button:has-text('Transform')"
+                        ).first
+                        if transform_tab.is_visible():
+                            transform_tab.click()
+                            page.wait_for_timeout(500)
+                            editor_body = page.inner_text("body")
+                            has_transform = (
+                                "aggregation" in editor_body.lower()
+                                or "sort" in editor_body.lower()
+                            )
+                            warn(
+                                "Panel editor shows transform controls",
+                                passed=has_transform,
+                                detail=f"has_transform_controls={has_transform}",
+                            )
 
                         # Click Apply Changes
                         apply_btn = page.locator(
