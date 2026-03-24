@@ -488,9 +488,69 @@ def run_test() -> dict:
                 detail=f"editing_badge={has_editing}",
             )
 
-            # --- Step 10: Add a panel via Add Chart ---
-            # Look for the Add Chart button in the floating toolbar
-            # or the AddPanelButton in the grid.
+            # --- Step 10: Discover available data fields ---
+            # Query the API to find what fields exist in the data.
+            # The raw data may have "Day"/"Reach" (unmapped) or
+            # "date"/"reach" (schema-mapped). We need to use the
+            # actual field names when configuring the panel.
+            share_tok = page.url.split("/v/")[-1].split("?")[0]
+            field_info = page.evaluate("""
+                async (token) => {
+                    try {
+                        const r = await fetch('/api/query', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                share_token: token,
+                                limit: 5, offset: 0
+                            })
+                        });
+                        const d = await r.json();
+                        if (d.success && d.records && d.records.length > 0) {
+                            return {
+                                fields: Object.keys(d.records[0]),
+                                count: d.records.length,
+                                sample: d.records[0]
+                            };
+                        }
+                        return {fields: [], count: 0, sample: null};
+                    } catch(e) {
+                        return {fields: [], count: 0, error: String(e)};
+                    }
+                }
+            """, share_tok)
+
+            data_fields = field_info.get("fields", [])
+            data_count = field_info.get("count", 0)
+
+            # Pick x-axis and y-axis from discovered fields.
+            # Prefer mapped names, fall back to raw names.
+            x_field = "date"
+            y_field = "reach"
+            if data_fields:
+                # Find a date-like field for x-axis
+                for candidate in ["date", "Day", "day"]:
+                    if candidate in data_fields:
+                        x_field = candidate
+                        break
+                # Find a numeric value field for y-axis
+                for candidate in ["reach", "Reach", "impressions",
+                                  "Impressions", "value"]:
+                    if candidate in data_fields:
+                        y_field = candidate
+                        break
+
+            step(
+                "Discovered data fields",
+                passed=data_count > 0,
+                detail=(
+                    f"count={data_count} "
+                    f"fields={data_fields[:6]} "
+                    f"x={x_field} y={y_field}"
+                ),
+            )
+
+            # --- Step 11: Add a panel via Add Chart ---
             add_btn = page.locator(
                 "button:has-text('Add Chart'), "
                 "button:has-text('Add Panel')"
@@ -521,18 +581,18 @@ def run_test() -> dict:
                 if bar_btn.is_visible():
                     bar_btn.click()
 
-                # Fill axis fields
+                # Fill axis fields using discovered field names
                 x_input = page.locator(
                     'input[placeholder="date"]'
                 )
                 if x_input.is_visible():
-                    x_input.fill("date")
+                    x_input.fill(x_field)
 
                 y_input = page.locator(
                     'input[placeholder="reach"]'
                 ).first
                 if y_input.is_visible():
-                    y_input.fill("reach")
+                    y_input.fill(y_field)
 
                 # Click Add Panel button
                 submit_btn = page.locator(
