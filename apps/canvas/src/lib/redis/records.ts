@@ -43,11 +43,20 @@ export async function fetchSourceRecords(
   // In practice there are few sources, so this is fast.
   if (!raw || !Array.isArray(raw) || raw.length === 0) {
     try {
-      const scanResult = await redis.scan(0, {
-        match: "data:records:*",
-        count: 100,
-      });
-      const allKeys = scanResult[1] ?? [];
+      let cursor = 0;
+      const allKeys: string[] = [];
+      do {
+        const scanResult = await redis.scan(cursor, {
+          match: "data:records:*",
+          count: 100,
+        });
+        cursor =
+          typeof scanResult[0] === "string"
+            ? parseInt(scanResult[0], 10)
+            : scanResult[0];
+        allKeys.push(...((scanResult[1] ?? []) as string[]));
+      } while (cursor !== 0);
+
       for (const key of allKeys) {
         const candidate = await redis.get<Record<string, unknown>[]>(
           key as string,

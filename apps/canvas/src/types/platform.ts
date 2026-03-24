@@ -73,9 +73,13 @@ export interface ChartConfig {
   label_field?: string;
   columns?: string[];
   sort_by?: string;
+  sort_direction?: "asc" | "desc";
   page_size?: number;
   aggregation?: string;
   label?: string;
+  stacked?: boolean;
+  warning_threshold?: number;
+  critical_threshold?: number;
 }
 
 export interface PanelQueryConfig {

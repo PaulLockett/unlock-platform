@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   X,
   Check,
@@ -11,26 +11,45 @@ import {
   Filter,
   Table,
   Hash,
+  ArrowUpDown,
+  Layers,
+  Database,
 } from "lucide-react";
 import type { Panel, ChartType, ChartConfig, PanelQueryConfig } from "@/types/platform";
 import ChartRenderer from "@/components/charts/chart-renderer";
+import { detectFieldTypes } from "@/lib/transform-data";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface PanelEditorProps {
   panel: Panel;
   panelData: Record<string, unknown>[];
   shareToken: string;
   schemaFields: string[];
+  availableSources?: { key: string; record_count: number; sample_fields: string[] }[];
   onApply: (updatedPanel: Panel) => void;
   onCancel: () => void;
 }
 
-type TabId = "data" | "display" | "axes" | "thresholds";
+type TabId = "data" | "display" | "axes" | "transform";
+
+interface SourceInfo {
+  key: string;
+  record_count: number;
+  sample_fields: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "display", label: "Display" },
   { id: "axes", label: "Axes" },
   { id: "data", label: "Data" },
-  { id: "thresholds", label: "Thresholds" },
+  { id: "transform", label: "Transform" },
 ];
 
 const CHART_TYPES: { type: ChartType; label: string; icon: React.ReactNode }[] = [
@@ -49,36 +68,60 @@ const WIDTH_OPTIONS = [
   { label: "Large", w: 6 },
 ];
 
-const AGGREGATIONS = ["sum", "count", "avg"];
+const HEIGHT_OPTIONS = [
+  { label: "Short", h: 1 },
+  { label: "Medium", h: 2 },
+  { label: "Tall", h: 3 },
+];
+
+const AGGREGATIONS = ["sum", "count", "avg", "min", "max"];
+
+const TIME_RANGES = [
+  { label: "Last 7 days", days: 7 },
+  { label: "Last 30 days", days: 30 },
+  { label: "Last 90 days", days: 90 },
+  { label: "Last 365 days", days: 365 },
+  { label: "All time", days: 0 },
+  { label: "Custom", days: -1 },
+];
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
 
 function FieldSelect({
   value,
   onChange,
   label,
   placeholder,
-  schemaFields,
+  fields,
+  fieldTypes,
+  allowNone,
 }: {
   value: string;
   onChange: (v: string) => void;
   label: string;
   placeholder: string;
-  schemaFields: string[];
+  fields: string[];
+  fieldTypes?: Map<string, string>;
+  allowNone?: boolean;
 }) {
   return (
     <div>
       <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
         {label}
       </label>
-      {schemaFields.length > 0 ? (
+      {fields.length > 0 ? (
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors appearance-none"
         >
-          <option value="">— Select field —</option>
-          {schemaFields.map((f) => (
+          <option value="">{allowNone ? "— None —" : "— Select field —"}</option>
+          {fields.map((f) => (
             <option key={f} value={f}>
               {f}
+              {fieldTypes?.has(f) ? ` (${fieldTypes.get(f)})` : ""}
             </option>
           ))}
         </select>
@@ -95,11 +138,24 @@ function FieldSelect({
   );
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[9px] tracking-widest text-white/25 uppercase font-mono pt-2">
+      {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export default function PanelEditor({
   panel,
   panelData,
   shareToken,
   schemaFields,
+  availableSources = [],
   onApply,
   onCancel,
 }: PanelEditorProps) {
@@ -109,6 +165,7 @@ export default function PanelEditor({
   const [title, setTitle] = useState(panel.title);
   const [chartType, setChartType] = useState<ChartType>(panel.chart_type);
   const [width, setWidth] = useState(panel.position.w);
+  const [height, setHeight] = useState(panel.position.h || 1);
 
   // Axes config
   const [xAxis, setXAxis] = useState(panel.chart_config.x_axis ?? "");
@@ -118,52 +175,122 @@ export default function PanelEditor({
   const [groupBy, setGroupBy] = useState(panel.chart_config.group_by ?? "");
 
   // Data config
-  const [aggregation, setAggregation] = useState(
-    panel.chart_config.aggregation ?? "sum",
-  );
-  const [channelKey, setChannelKey] = useState(
-    panel.query_config.channel_key ?? "",
-  );
+  const [sourceKey, setSourceKey] = useState(panel.query_config.source_key ?? "");
+  const [channelKey, setChannelKey] = useState(panel.query_config.channel_key ?? "");
+  const [timeRange, setTimeRange] = useState<number>(-1); // -1 = custom
   const [since, setSince] = useState(panel.query_config.since ?? "");
   const [until, setUntil] = useState(panel.query_config.until ?? "");
 
+  // Transform config
+  const [aggregation, setAggregation] = useState(panel.chart_config.aggregation ?? "sum");
+  const [sortField, setSortField] = useState(panel.chart_config.sort_by ?? "");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(
+    panel.chart_config.sort_direction ?? "asc",
+  );
+  const [stacked, setStacked] = useState(panel.chart_config.stacked ?? false);
+
   // Thresholds
-  const [warningValue, setWarningValue] = useState("");
-  const [criticalValue, setCriticalValue] = useState("");
+  const [warningValue, setWarningValue] = useState(
+    panel.chart_config.warning_threshold?.toString() ?? "",
+  );
+  const [criticalValue, setCriticalValue] = useState(
+    panel.chart_config.critical_threshold?.toString() ?? "",
+  );
 
   // Live preview data
   const [previewData, setPreviewData] = useState<Record<string, unknown>[]>(panelData);
   const [previewLoading, setPreviewLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // Detect field types from live data
+  const fieldTypes = useMemo(() => detectFieldTypes(previewData), [previewData]);
+
+  // Auto-detect available fields: merge schema fields + fields from live data
+  const allFields = useMemo(() => {
+    const fromData = previewData.length > 0 ? Object.keys(previewData[0]) : [];
+    const merged = new Set([...schemaFields, ...fromData]);
+    return [...merged].sort();
+  }, [schemaFields, previewData]);
+
+  // Numeric fields only (for y-axis, value fields)
+  const numericFields = useMemo(() => {
+    return allFields.filter((f) => fieldTypes.get(f) === "number");
+  }, [allFields, fieldTypes]);
+
+  // When selecting a source, update sample fields
+  const selectedSource = availableSources.find((s) => s.key === sourceKey);
+
+  // Merge sample fields from selected source into available fields
+  const effectiveFields = useMemo(() => {
+    const fromSource = selectedSource?.sample_fields ?? [];
+    const merged = new Set([...allFields, ...fromSource]);
+    return [...merged].sort();
+  }, [allFields, selectedSource]);
+
+  // Time range helper
+  useEffect(() => {
+    if (timeRange === -1) return; // custom — don't override
+    if (timeRange === 0) {
+      // all time
+      setSince("");
+      setUntil("");
+      return;
+    }
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(start.getDate() - timeRange);
+    setSince(start.toISOString().split("T")[0]);
+    setUntil(now.toISOString().split("T")[0]);
+  }, [timeRange]);
+
   // Build a live Panel from current editor state
   const buildPreviewPanel = useCallback((): Panel => {
     const isMetricOrPie = chartType === "metric" || chartType === "pie";
     const chartConfig: ChartConfig = isMetricOrPie
-      ? { value_field: yAxis || undefined, label: title, aggregation }
+      ? {
+          value_field: yAxis || undefined,
+          label: title,
+          aggregation,
+        }
       : {
           x_axis: xAxis || undefined,
           y_axis: yAxis || undefined,
           group_by: groupBy || undefined,
+          aggregation,
+          sort_by: sortField || undefined,
+          sort_direction: sortDirection,
+          stacked,
         };
 
     if (chartType === "table") {
-      chartConfig.columns = [xAxis, yAxis].filter(Boolean);
+      chartConfig.columns = effectiveFields.length > 0
+        ? [xAxis, yAxis, groupBy].filter(Boolean)
+        : undefined;
+      chartConfig.sort_by = sortField || undefined;
+      chartConfig.sort_direction = sortDirection;
     }
+
+    if (warningValue) chartConfig.warning_threshold = parseFloat(warningValue);
+    if (criticalValue) chartConfig.critical_threshold = parseFloat(criticalValue);
 
     return {
       id: panel.id,
       title,
       chart_type: chartType,
-      position: { ...panel.position, w: Math.min(width, 6) },
+      position: { ...panel.position, w: Math.min(width, 6), h: height },
       chart_config: chartConfig,
       query_config: {
+        source_key: sourceKey || null,
         channel_key: channelKey || null,
         since: since || null,
         until: until || null,
       },
     };
-  }, [title, chartType, width, xAxis, yAxis, groupBy, aggregation, channelKey, since, until, panel.id, panel.position]);
+  }, [
+    title, chartType, width, height, xAxis, yAxis, groupBy, aggregation,
+    sortField, sortDirection, stacked, channelKey, sourceKey, since, until,
+    panel.id, panel.position, effectiveFields, warningValue, criticalValue,
+  ]);
 
   // Live data fetch with debounce
   useEffect(() => {
@@ -173,6 +300,7 @@ export default function PanelEditor({
       setPreviewLoading(true);
       try {
         const queryConfig: PanelQueryConfig = {
+          source_key: sourceKey || null,
           channel_key: channelKey || null,
           since: since || null,
           until: until || null,
@@ -182,6 +310,7 @@ export default function PanelEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             share_token: shareToken,
+            source_key: queryConfig.source_key,
             channel_key: queryConfig.channel_key,
             engagement_type: null,
             since: queryConfig.since,
@@ -202,7 +331,7 @@ export default function PanelEditor({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [shareToken, channelKey, since, until]);
+  }, [shareToken, sourceKey, channelKey, since, until]);
 
   const handleApply = () => {
     onApply(buildPreviewPanel());
@@ -233,6 +362,11 @@ export default function PanelEditor({
               Editing Panel
             </span>
             <span className="text-sm font-mono text-offwhite">{title || "Untitled"}</span>
+            {previewData.length > 0 && (
+              <span className="text-[9px] font-mono text-white/25 tracking-wider">
+                {previewData.length} rows
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -275,6 +409,9 @@ export default function PanelEditor({
 
             {/* Tab content */}
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              {/* ============================================================ */}
+              {/* DISPLAY TAB                                                   */}
+              {/* ============================================================ */}
               {activeTab === "display" && (
                 <>
                   {/* Title */}
@@ -337,19 +474,91 @@ export default function PanelEditor({
                       ))}
                     </div>
                   </div>
+
+                  {/* Height */}
+                  <div>
+                    <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+                      Panel Height
+                    </label>
+                    <div className="flex gap-2">
+                      {HEIGHT_OPTIONS.map(({ label, h }) => (
+                        <button
+                          key={h}
+                          onClick={() => setHeight(h)}
+                          className={`flex-1 py-2 text-[10px] tracking-widest uppercase font-mono border transition-colors ${
+                            height === h
+                              ? "border-coral bg-coral/10 text-coral"
+                              : "border-white/10 text-white/30 hover:text-white/60 hover:border-white/20"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Stacked toggle (bar/area only) */}
+                  {(chartType === "bar" || chartType === "area") && (
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex items-center gap-2 text-[10px] tracking-widest text-white/40 uppercase font-mono">
+                        <Layers className="w-3.5 h-3.5" />
+                        Stacked
+                      </div>
+                      <button
+                        onClick={() => setStacked(!stacked)}
+                        className={`w-10 h-5 rounded-full transition-colors relative ${
+                          stacked ? "bg-coral" : "bg-white/10"
+                        }`}
+                      >
+                        <div
+                          className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${
+                            stacked ? "translate-x-5" : "translate-x-0.5"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
 
+              {/* ============================================================ */}
+              {/* AXES TAB                                                      */}
+              {/* ============================================================ */}
               {activeTab === "axes" && (
                 <>
+                  {effectiveFields.length > 0 && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-white/[0.02] border border-white/5 text-[9px] font-mono text-white/30 tracking-wider">
+                      <Database className="w-3 h-3" />
+                      {effectiveFields.length} fields detected
+                      {numericFields.length > 0 && (
+                        <span className="text-coral">
+                          ({numericFields.length} numeric)
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {chartType === "metric" || chartType === "pie" ? (
-                    <FieldSelect
-                      value={yAxis}
-                      onChange={setYAxis}
-                      label="Value Field"
-                      placeholder="reach"
-                      schemaFields={schemaFields}
-                    />
+                    <>
+                      <FieldSelect
+                        value={yAxis}
+                        onChange={setYAxis}
+                        label="Value Field"
+                        placeholder="reach"
+                        fields={numericFields.length > 0 ? numericFields : effectiveFields}
+                        fieldTypes={fieldTypes}
+                      />
+                      {chartType === "pie" && (
+                        <FieldSelect
+                          value={xAxis}
+                          onChange={setXAxis}
+                          label="Label Field"
+                          placeholder="category"
+                          fields={effectiveFields}
+                          fieldTypes={fieldTypes}
+                        />
+                      )}
+                    </>
                   ) : (
                     <>
                       <FieldSelect
@@ -357,52 +566,129 @@ export default function PanelEditor({
                         onChange={setXAxis}
                         label="X-Axis Field"
                         placeholder="date"
-                        schemaFields={schemaFields}
+                        fields={effectiveFields}
+                        fieldTypes={fieldTypes}
                       />
                       <FieldSelect
                         value={yAxis}
                         onChange={setYAxis}
                         label="Y-Axis Field"
                         placeholder="reach"
-                        schemaFields={schemaFields}
+                        fields={numericFields.length > 0 ? numericFields : effectiveFields}
+                        fieldTypes={fieldTypes}
                       />
                       <FieldSelect
                         value={groupBy}
                         onChange={setGroupBy}
                         label="Group By (optional)"
                         placeholder=""
-                        schemaFields={schemaFields}
+                        fields={effectiveFields}
+                        fieldTypes={fieldTypes}
+                        allowNone
                       />
                     </>
                   )}
                 </>
               )}
 
+              {/* ============================================================ */}
+              {/* DATA TAB                                                      */}
+              {/* ============================================================ */}
               {activeTab === "data" && (
                 <>
-                  {/* Aggregation */}
+                  {/* Source selector */}
                   <div>
                     <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
-                      Aggregation
+                      Data Source
                     </label>
-                    <div className="flex gap-2">
-                      {AGGREGATIONS.map((agg) => (
+                    {availableSources.length > 0 ? (
+                      <select
+                        value={sourceKey}
+                        onChange={(e) => setSourceKey(e.target.value)}
+                        className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors appearance-none"
+                      >
+                        <option value="">— Auto-detect —</option>
+                        {availableSources.map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.key} ({s.record_count} records)
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={sourceKey}
+                        onChange={(e) => setSourceKey(e.target.value)}
+                        placeholder="Leave empty to auto-detect"
+                        className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
+                      />
+                    )}
+                    {selectedSource && (
+                      <div className="mt-2 text-[9px] font-mono text-white/25 tracking-wider">
+                        Fields: {selectedSource.sample_fields.join(", ")}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Time range presets */}
+                  <div>
+                    <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+                      Time Range
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {TIME_RANGES.map(({ label, days }) => (
                         <button
-                          key={agg}
-                          onClick={() => setAggregation(agg)}
-                          className={`flex-1 py-2 text-[10px] tracking-widest uppercase font-mono border transition-colors ${
-                            aggregation === agg
+                          key={label}
+                          onClick={() => setTimeRange(days)}
+                          className={`py-2 text-[9px] tracking-widest uppercase font-mono border transition-colors ${
+                            timeRange === days
                               ? "border-coral bg-coral/10 text-coral"
                               : "border-white/10 text-white/30 hover:text-white/60 hover:border-white/20"
                           }`}
                         >
-                          {agg}
+                          {label}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Filter fields */}
+                  {/* Custom date range (shown when "Custom" is selected or dates are manually set) */}
+                  {(timeRange === -1 || since || until) && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+                          Since
+                        </label>
+                        <input
+                          type="date"
+                          value={since}
+                          onChange={(e) => {
+                            setSince(e.target.value);
+                            setTimeRange(-1);
+                          }}
+                          className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+                          Until
+                        </label>
+                        <input
+                          type="date"
+                          value={until}
+                          onChange={(e) => {
+                            setUntil(e.target.value);
+                            setTimeRange(-1);
+                          }}
+                          className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <SectionLabel>Filters</SectionLabel>
+
+                  {/* Channel Key */}
                   <div>
                     <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
                       Channel Key
@@ -415,62 +701,104 @@ export default function PanelEditor({
                       className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
-                        Since
-                      </label>
-                      <input
-                        type="date"
-                        value={since}
-                        onChange={(e) => setSince(e.target.value)}
-                        className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
-                        Until
-                      </label>
-                      <input
-                        type="date"
-                        value={until}
-                        onChange={(e) => setUntil(e.target.value)}
-                        className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors"
-                      />
-                    </div>
-                  </div>
                 </>
               )}
 
-              {activeTab === "thresholds" && (
+              {/* ============================================================ */}
+              {/* TRANSFORM TAB                                                 */}
+              {/* ============================================================ */}
+              {activeTab === "transform" && (
                 <>
+                  {/* Aggregation */}
                   <div>
                     <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
-                      Warning Threshold
+                      Aggregation
                     </label>
-                    <input
-                      type="number"
-                      value={warningValue}
-                      onChange={(e) => setWarningValue(e.target.value)}
-                      placeholder="e.g. 1000"
-                      className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
-                    />
+                    <div className="flex gap-1.5 flex-wrap">
+                      {AGGREGATIONS.map((agg) => (
+                        <button
+                          key={agg}
+                          onClick={() => setAggregation(agg)}
+                          className={`px-3 py-2 text-[10px] tracking-widest uppercase font-mono border transition-colors ${
+                            aggregation === agg
+                              ? "border-coral bg-coral/10 text-coral"
+                              : "border-white/10 text-white/30 hover:text-white/60 hover:border-white/20"
+                          }`}
+                        >
+                          {agg}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[9px] font-mono text-white/20 tracking-wider">
+                      Groups by x-axis field and aggregates y-axis values
+                    </p>
                   </div>
-                  <div>
-                    <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
-                      Critical Threshold
-                    </label>
-                    <input
-                      type="number"
-                      value={criticalValue}
-                      onChange={(e) => setCriticalValue(e.target.value)}
-                      placeholder="e.g. 500"
-                      className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
-                    />
+
+                  <SectionLabel>Sort</SectionLabel>
+
+                  {/* Sort field */}
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <FieldSelect
+                        value={sortField}
+                        onChange={setSortField}
+                        label="Sort By"
+                        placeholder=""
+                        fields={effectiveFields}
+                        fieldTypes={fieldTypes}
+                        allowNone
+                      />
+                    </div>
+                    <div className="w-28 flex flex-col">
+                      <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+                        Direction
+                      </label>
+                      <button
+                        onClick={() =>
+                          setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+                        }
+                        className="flex items-center justify-center gap-1.5 flex-1 border border-white/10 text-white/40 hover:text-white hover:border-white/20 transition-colors text-[10px] tracking-widest uppercase font-mono"
+                      >
+                        <ArrowUpDown className="w-3 h-3" />
+                        {sortDirection}
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-white/20 text-[10px] font-mono tracking-wider">
-                    Thresholds are saved with the panel config. Visual rendering on charts is coming in a future phase.
-                  </p>
+
+                  <SectionLabel>Thresholds</SectionLabel>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+                        Warning
+                      </label>
+                      <div className="relative">
+                        <div className="absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-amber-400" />
+                        <input
+                          type="number"
+                          value={warningValue}
+                          onChange={(e) => setWarningValue(e.target.value)}
+                          placeholder="e.g. 1000"
+                          className="w-full bg-charcoal border border-white/10 pl-8 pr-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+                        Critical
+                      </label>
+                      <div className="relative">
+                        <div className="absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-red-500" />
+                        <input
+                          type="number"
+                          value={criticalValue}
+                          onChange={(e) => setCriticalValue(e.target.value)}
+                          placeholder="e.g. 500"
+                          className="w-full bg-charcoal border border-white/10 pl-8 pr-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </>
               )}
             </div>
@@ -478,13 +806,21 @@ export default function PanelEditor({
 
           {/* Right: Live preview */}
           <div className="w-7/12 flex flex-col overflow-hidden">
-            <div className="px-6 py-4 border-b border-white/10 shrink-0">
-              <div className="text-[10px] tracking-widest text-coral uppercase font-mono">
-                Live Preview
+            <div className="px-6 py-4 border-b border-white/10 shrink-0 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] tracking-widest text-coral uppercase font-mono">
+                  Live Preview
+                </div>
+                <div className="text-xl font-display text-sage uppercase mt-1">
+                  {title || "Untitled Panel"}
+                </div>
               </div>
-              <div className="text-xl font-display text-sage uppercase mt-1">
-                {title || "Untitled Panel"}
-              </div>
+              {previewData.length > 0 && (
+                <div className="text-[9px] font-mono text-white/20 tracking-wider text-right">
+                  <div>{previewData.length} records</div>
+                  <div>{effectiveFields.length} fields</div>
+                </div>
+              )}
             </div>
             <div className="flex-1 p-6 min-h-[400px]">
               <ChartRenderer

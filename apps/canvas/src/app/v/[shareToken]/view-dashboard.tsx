@@ -42,8 +42,24 @@ export default function ViewDashboard({
   >({});
   const [loadingPanels, setLoadingPanels] = useState<Set<string>>(new Set());
 
+  // Available data sources for panel editor
+  const [availableSources, setAvailableSources] = useState<
+    { key: string; record_count: number; sample_fields: string[] }[]
+  >([]);
+
   // Track panel IDs to avoid refetching when panels haven't changed
   const prevPanelIdsRef = useRef<string>("");
+
+  // Fetch available sources when entering edit mode
+  useEffect(() => {
+    if (!editMode) return;
+    fetch("/api/sources")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setAvailableSources(data.sources);
+      })
+      .catch(() => {});
+  }, [editMode]);
 
   // Fetch data for panels in parallel
   const fetchPanelData = useCallback(
@@ -61,6 +77,7 @@ export default function ViewDashboard({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 share_token: shareToken,
+                source_key: panel.query_config.source_key ?? null,
                 channel_key: panel.query_config.channel_key ?? null,
                 engagement_type: panel.query_config.engagement_type ?? null,
                 since: panel.query_config.since ?? null,
@@ -410,6 +427,7 @@ export default function ViewDashboard({
             panelData={panelData[editingPanelId] ?? []}
             shareToken={shareToken}
             schemaFields={schemaFields}
+            availableSources={availableSources}
             onApply={(updatedPanel) => {
               handleUpdatePanel(updatedPanel);
               setEditingPanelId(null);
