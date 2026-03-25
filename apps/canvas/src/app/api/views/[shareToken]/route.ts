@@ -25,7 +25,7 @@ export async function GET(
       return NextResponse.json(result, { status });
     }
 
-    // Check visibility: if not public, require auth
+    // Check visibility: if not public, require auth + permission
     const view = result.view;
     if (view?.visibility !== "public") {
       const user = await getSessionUser();
@@ -35,13 +35,25 @@ export async function GET(
           { status: 401 },
         );
       }
+
+      // Verify user has access to this specific view
+      const isOwner = view?.created_by === user.id;
+      const hasGrant = result.permissions?.some(
+        (p) =>
+          p.principal_id === user.id &&
+          ["read", "write", "admin"].includes(p.permission),
+      );
+      if (!isOwner && !hasGrant && user.role !== "admin") {
+        return NextResponse.json(
+          { success: false, message: "Access denied" },
+          { status: 403 },
+        );
+      }
     }
 
-    // Visibility-dependent caching
-    const cacheHeader =
-      view?.visibility === "public"
-        ? "public, max-age=120, stale-while-revalidate=300"
-        : "private, max-age=60, stale-while-revalidate=120";
+    // No CDN caching — panels change frequently during edit sessions.
+    // The SWR hook deduplicates client-side requests.
+    const cacheHeader = "private, no-cache, no-store, must-revalidate";
 
     return NextResponse.json(result, {
       headers: { "Cache-Control": cacheHeader },
@@ -110,6 +122,8 @@ export async function PATCH(
     }
 
     // Update via configure workflow (mutations stay on Temporal)
+    // Pass existing view_id and share_token so activate_view updates
+    // the existing view instead of creating a new one.
     const client = await getTemporalClient();
     const result = await client.workflow.execute("ConfigureWorkflow", {
       taskQueue: TASK_QUEUES.DATA_MANAGER,
@@ -127,6 +141,8 @@ export async function PATCH(
           layout_config: parsed.data.layout_config ?? view.layout_config ?? {},
           visibility: parsed.data.visibility ?? view.visibility ?? "public",
           created_by: view.created_by ?? user.id,
+          view_id: view.id,
+          share_token: shareToken,
         },
       ],
     });

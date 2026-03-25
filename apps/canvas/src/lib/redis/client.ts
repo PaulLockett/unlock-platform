@@ -49,4 +49,7 @@ export const keys = {
   perm: (viewId: string) => `cfg:perm:${viewId}`,
   permIdxPrincipal: (principalId: string) =>
     `cfg:perm:idx:principal:${principalId}`,
+
+  // Data records (ingested source data cached for fast query reads)
+  dataRecords: (sourceKey: string) => `data:records:${sourceKey}`,
 } as const;

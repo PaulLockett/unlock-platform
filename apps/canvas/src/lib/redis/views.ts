@@ -77,10 +77,15 @@ export async function retrieveView(
     keys.perm(viewId),
   );
   const permissions = permHash
-    ? Object.entries(permHash).map(([principalId, json]) => {
-        const parsed =
-          typeof json === "string" ? JSON.parse(json) : json;
-        return { principal_id: principalId, ...parsed };
+    ? Object.entries(permHash).flatMap(([principalId, json]) => {
+        try {
+          const parsed =
+            typeof json === "string" ? JSON.parse(json) : json;
+          return [{ principal_id: principalId, ...parsed }];
+        } catch {
+          console.warn(`Malformed permission entry for principal ${principalId}, skipping`);
+          return [];
+        }
       })
     : [];
 

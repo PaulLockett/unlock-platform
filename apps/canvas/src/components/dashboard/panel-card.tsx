@@ -23,7 +23,7 @@ export default function PanelCard({
 }: PanelCardProps) {
   return (
     <div
-      className={`border border-white/10 bg-charcoal-light p-4 flex flex-col min-h-[200px] relative group/panel ${
+      className={`border border-white/10 bg-charcoal-light p-4 flex flex-col relative group/panel ${
         editMode ? "hover:border-coral cursor-move" : ""
       }`}
       style={{
@@ -32,6 +32,7 @@ export default function PanelCard({
           panel.position.h > 1
             ? `span ${Math.min(panel.position.h, 4)}`
             : undefined,
+        minHeight: `${(panel.position.h || 1) * 200}px`,
       }}
     >
       {/* Edit mode overlay controls */}

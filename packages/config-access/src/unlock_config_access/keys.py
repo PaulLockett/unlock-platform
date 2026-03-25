@@ -117,3 +117,13 @@ def perm_key(view_id: str) -> str:
 def perm_idx_principal(principal_id: str) -> str:
     """Set of view IDs a principal has access to."""
     return f"cfg:perm:idx:principal:{principal_id}"
+
+
+# ============================================================================
+# Data record keys (ingested source data cached for fast reads)
+# ============================================================================
+
+
+def data_records_key(source_key: str) -> str:
+    """JSON array of ingested records for a source."""
+    return f"data:records:{source_key}"

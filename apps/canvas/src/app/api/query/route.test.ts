@@ -35,6 +35,12 @@ vi.mock("@/lib/temporal/client", () => ({
   getTemporalClient: mocks.mockGetTemporalClient,
   TASK_QUEUES: { DATA_MANAGER: "data-manager-queue", CONFIG_ACCESS: "config-access-queue" },
 }));
+vi.mock("@/lib/redis/views", () => ({
+  retrieveView: vi.fn().mockResolvedValue({ success: false }),
+}));
+vi.mock("@/lib/redis/records", () => ({
+  fetchSourceRecords: vi.fn().mockResolvedValue({ records: [], total_count: 0 }),
+}));
 
 import { POST } from "./route";
 

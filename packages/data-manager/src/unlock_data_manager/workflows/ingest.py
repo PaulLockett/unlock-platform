@@ -20,6 +20,7 @@ from datetime import timedelta
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
+    from unlock_config_access.activities import cache_source_records
     from unlock_data_access.activities import (
         catalog_content,
         close_pipeline_run,
@@ -34,6 +35,7 @@ with workflow.unsafe.imports_passed_through():
     from unlock_shared.manager_models import IngestRequest, IngestResult
     from unlock_shared.source_models import FetchRequest
     from unlock_shared.task_queues import (
+        CONFIG_ACCESS_QUEUE,
         DATA_ACCESS_QUEUE,
         SOURCE_ACCESS_QUEUE,
         TRANSFORM_ENGINE_QUEUE,
@@ -108,6 +110,17 @@ class IngestWorkflow:
                 pipeline_run_id=pipeline_run_id,
                 records_fetched=0,
             )
+
+        # Step 2b: Cache raw records in Redis for fast Canvas query reads
+        await workflow.execute_activity(
+            cache_source_records,
+            {
+                "source_key": request.source_name,
+                "records": fetch_result.records,
+            },
+            task_queue=CONFIG_ACCESS_QUEUE,
+            start_to_close_timeout=timedelta(seconds=30),
+        )
 
         # Step 3: Catalog raw records as ContentRecords in Data Access
         channel_key = request.channel_key or request.source_type
