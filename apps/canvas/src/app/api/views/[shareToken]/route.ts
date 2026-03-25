@@ -51,11 +51,9 @@ export async function GET(
       }
     }
 
-    // Visibility-dependent caching
-    const cacheHeader =
-      view?.visibility === "public"
-        ? "public, max-age=120, stale-while-revalidate=300"
-        : "private, max-age=60, stale-while-revalidate=120";
+    // No CDN caching — panels change frequently during edit sessions.
+    // The SWR hook deduplicates client-side requests.
+    const cacheHeader = "private, no-cache, no-store, must-revalidate";
 
     return NextResponse.json(result, {
       headers: { "Cache-Control": cacheHeader },

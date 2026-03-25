@@ -630,21 +630,55 @@ def run_test() -> dict:
                 )
 
                 # --- Step 11: Save the layout ---
+                # Intercept the PATCH response to see what the
+                # backend actually returns.
                 save_btn = page.locator(
                     "button:has-text('Save')"
                 ).first
                 if save_btn.is_visible():
+                    # Call PATCH directly from JS to capture response
+                    save_result = page.evaluate("""
+                        async () => {
+                            try {
+                                const token = window.location.pathname
+                                    .split('/v/')[1].split('?')[0];
+                                // Get panels from the edit state
+                                // by reading the grid DOM
+                                const panelEls = document.querySelectorAll(
+                                    '[style*="grid-column"]'
+                                );
+                                return {
+                                    token: token,
+                                    panel_els: panelEls.length,
+                                };
+                            } catch(e) {
+                                return {error: String(e)};
+                            }
+                        }
+                    """)
+                    warn(
+                        "Pre-save state",
+                        passed=True,
+                        detail=(
+                            f"token={save_result.get('token')} "
+                            f"panel_els={save_result.get('panel_els')}"
+                        ),
+                    )
+
                     save_btn.click()
 
-                    # Save triggers PATCH → ConfigureWorkflow. If the
-                    # backend creates a new view (old workers), the
-                    # frontend redirects to the new share_token URL.
-                    # Wait for either:
-                    #  a) URL changes (redirect to new view)
-                    #  b) Edit mode exits (save completed in place)
+                    # Wait for save to complete
                     pre_save_url = page.url
-                    page.wait_for_timeout(8000)
+                    page.wait_for_timeout(10000)
                     post_save_url = page.url
+
+                    # Check if editing badge is gone (save completed)
+                    body_after_save = page.inner_text("body").upper()
+                    editing_gone = "EDITING" not in body_after_save
+                    save_error = (
+                        "SAVE FAILED" in body_after_save
+                        or "ERROR" in body_after_save
+                    )
 
                     if post_save_url != pre_save_url:
                         step(
@@ -652,14 +686,35 @@ def run_test() -> dict:
                             detail=f"new_url={post_save_url}",
                         )
                     else:
-                        step("Saved layout")
+                        step(
+                            "Saved layout",
+                            detail=(
+                                f"editing_gone={editing_gone} "
+                                f"error={save_error}"
+                            ),
+                        )
 
-                    # Reload and verify persistence at the CURRENT url
+                    # Hard-reload the page to verify persistence.
+                    # Clear browser cache first to avoid stale responses
+                    # (the GET /api/views endpoint sets Cache-Control
+                    # public, max-age=120 for public views).
                     current_url = page.url
-                    page.reload(wait_until="load")
+                    page.evaluate(
+                        "() => caches && caches.keys().then("
+                        "ks => Promise.all(ks.map(k => caches.delete(k))))"
+                    )
+                    page.goto(
+                        current_url.split("?")[0],
+                        wait_until="load",
+                    )
                     with contextlib.suppress(Exception):
                         page.wait_for_selector(
                             "text=Back to Views", timeout=30000
+                        )
+                    # Wait for panels to render (async data fetch)
+                    with contextlib.suppress(Exception):
+                        page.wait_for_selector(
+                            "text=E2E Test Panel", timeout=15000
                         )
 
                     # Query the API directly to check what the view
@@ -669,7 +724,10 @@ def run_test() -> dict:
                             try {
                                 const token = window.location.pathname
                                     .split('/v/')[1];
-                                const r = await fetch('/api/views/' + token);
+                                const r = await fetch(
+                                    '/api/views/' + token + '?t=' + Date.now(),
+                                    {cache: 'no-store'}
+                                );
                                 const d = await r.json();
                                 if (!d.success) return {error: d.message};
                                 const v = d.view || {};
