@@ -35,11 +35,6 @@ interface PanelEditorProps {
 
 type TabId = "data" | "display" | "axes" | "transform";
 
-interface SourceInfo {
-  key: string;
-  record_count: number;
-  sample_fields: string[];
-}
 
 // ---------------------------------------------------------------------------
 // Constants

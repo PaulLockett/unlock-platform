@@ -81,25 +81,32 @@ export default function AddPanelModal({
 
   useEffect(() => {
     if (!open) return;
-    setLoadingData(true);
-    fetch("/api/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        share_token: shareToken,
-        source_key: sourceKey || null,
-        limit: 20,
-        offset: 0,
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && data.records) {
+    let cancelled = false;
+    const doFetch = async () => {
+      setLoadingData(true);
+      try {
+        const r = await fetch("/api/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            share_token: shareToken,
+            source_key: sourceKey || null,
+            limit: 20,
+            offset: 0,
+          }),
+        });
+        const data = await r.json();
+        if (!cancelled && data.success && data.records) {
           setLiveData(data.records);
         }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingData(false));
+      } catch {
+        // ignore fetch errors
+      } finally {
+        if (!cancelled) setLoadingData(false);
+      }
+    };
+    doFetch();
+    return () => { cancelled = true; };
   }, [open, shareToken, sourceKey]);
 
   // Detect fields from live data

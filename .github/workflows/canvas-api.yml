@@ -6,6 +6,10 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+concurrency:
+  group: canvas-api-${{ github.head_ref }}
+  cancel-in-progress: true
+
 permissions:
   pull-requests: write
   deployments: read
