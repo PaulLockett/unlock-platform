@@ -387,7 +387,12 @@ export default function ViewDashboard({
         </div>
 
         {/* Floating toolbar (edit mode only) */}
-        {editMode && <EditToolbar onAddPanel={handleAddPanel} />}
+        {editMode && (
+          <EditToolbar
+            panelCount={editPanels.length}
+            onAddChart={handleAddPanel}
+          />
+        )}
       </main>
 
       {/* Share dialog */}
@@ -416,7 +421,9 @@ export default function ViewDashboard({
         return (
           <PanelEditor
             panel={editingPanel}
-            data={panelData[editingPanelId] ?? []}
+            panelData={panelData[editingPanelId] ?? []}
+            shareToken={shareToken}
+            schemaFields={[]}
             onApply={handleApplyPanelEdit}
             onCancel={() => setEditingPanelId(null)}
           />
