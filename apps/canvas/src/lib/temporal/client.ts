@@ -77,4 +77,5 @@ export async function getTemporalClient(): Promise<Client> {
 export const TASK_QUEUES = {
   DATA_MANAGER: "data-manager-queue",
   CONFIG_ACCESS: "config-access-queue",
+  SCHEDULER: "scheduler-queue",
 } as const;

@@ -57,6 +57,7 @@ from unlock_data_manager.workflows.manage_source import ManageSourceWorkflow
 from unlock_data_manager.workflows.query import QueryWorkflow
 from unlock_data_manager.workflows.retrieve_view import RetrieveViewWorkflow
 from unlock_data_manager.workflows.revoke_access import RevokeAccessWorkflow
+from unlock_data_manager.workflows.schedule_harvest import ScheduleHarvestWorkflow
 from unlock_data_manager.workflows.share import ShareWorkflow
 from unlock_data_manager.workflows.survey_configs import SurveyConfigsWorkflow
 from unlock_llm_gateway.activities import hello_llm_assess
@@ -129,6 +130,7 @@ COMPONENTS: dict[str, ComponentConfig] = {
             SurveyConfigsWorkflow,
             RetrieveViewWorkflow,
             RevokeAccessWorkflow,
+            ScheduleHarvestWorkflow,
         ],
     ),
     "source-access": ComponentConfig(

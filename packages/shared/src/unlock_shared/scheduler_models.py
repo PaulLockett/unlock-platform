@@ -25,12 +25,24 @@ from unlock_shared.models import PlatformResult
 
 
 class RegisterHarvestRequest(BaseModel):
-    """Input for register_harvest: create a recurring schedule for a data source."""
+    """Input for register_harvest: create a recurring schedule for a data source.
+
+    Includes the full ingest config so the Temporal Schedule can pass it
+    as args to IngestWorkflow when the cron fires.
+    """
 
     source_name: str
     cron_expression: str
     time_zone: str = "America/Chicago"
     note: str = ""
+    # IngestWorkflow args — stored in the schedule so each run knows what to fetch
+    source_type: str = ""
+    resource_type: str = "posts"
+    channel_key: str | None = None
+    auth_env_var: str | None = None
+    base_url: str | None = None
+    config_json: str | None = None
+    max_pages: int = 100
 
 
 class RegisterHarvestResult(PlatformResult):

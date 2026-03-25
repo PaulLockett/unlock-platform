@@ -66,6 +66,20 @@ async def register_harvest(req: RegisterHarvestRequest) -> RegisterHarvestResult
 
     try:
         client = await connect()
+
+        # Build IngestRequest dict to pass as workflow args.
+        # The schedule fires IngestWorkflow with these params on each run.
+        ingest_args = {
+            "source_name": req.source_name,
+            "source_type": req.source_type,
+            "resource_type": req.resource_type,
+            "channel_key": req.channel_key,
+            "auth_env_var": req.auth_env_var,
+            "base_url": req.base_url,
+            "config_json": req.config_json,
+            "max_pages": req.max_pages,
+        }
+
         await client.create_schedule(
             id=sid,
             schedule=Schedule(
@@ -73,6 +87,7 @@ async def register_harvest(req: RegisterHarvestRequest) -> RegisterHarvestResult
                     "IngestWorkflow",
                     id=f"{sid}-run",
                     task_queue=DATA_MANAGER_QUEUE,
+                    args=[ingest_args],
                 ),
                 spec=ScheduleSpec(
                     cron_expressions=[req.cron_expression],
