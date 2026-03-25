@@ -2,48 +2,78 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { ArrowLeft, Pencil, Save, X, Loader2 } from "lucide-react";
+import { ArrowLeft, Share2, MessageCircle, Pencil, Loader2 } from "lucide-react";
 import SideNav from "@/components/nav/side-nav";
 import PanelGrid from "@/components/dashboard/panel-grid";
 import EditToolbar from "@/components/dashboard/edit-toolbar";
-import AddPanelModal from "@/components/dashboard/add-panel-modal";
-import { useView } from "@/hooks/use-view";
-import type { Panel, LayoutConfig } from "@/types/platform";
+import PanelEditor from "@/components/dashboard/panel-editor";
+import ShareDialog from "@/components/views/share-dialog";
+import ChatPanel from "@/components/chat/chat-panel";
+import type {
+  ViewDefinition,
+  SchemaDefinition,
+  ViewPermission,
+  Panel,
+  LayoutConfig,
+  ChartType,
+} from "@/types/platform";
 
 interface ViewDashboardProps {
   shareToken: string;
   initialEditMode?: boolean;
-  userId?: string | null;
-  isAdmin?: boolean;
 }
 
 export default function ViewDashboard({
   shareToken,
   initialEditMode = false,
-  userId,
-  isAdmin = false,
 }: ViewDashboardProps) {
-  const { view, permissions, isLoading, isError, errorMessage, refresh } =
-    useView(shareToken);
-
-  // Edit mode state
+  const [view, setView] = useState<ViewDefinition | null>(null);
+  const [_schema, setSchema] = useState<SchemaDefinition | null>(null);
+  const [permissions, setPermissions] = useState<ViewPermission[]>([]);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [editMode, setEditMode] = useState(initialEditMode);
-  const [editPanels, setEditPanels] = useState<Panel[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const [addPanelModalOpen, setAddPanelModalOpen] = useState(false);
-  const [editingPanel, setEditingPanel] = useState<Panel | undefined>();
-
-  // Panel data for rendering charts
+  const [saving, setSaving] = useState(false);
   const [panelData, setPanelData] = useState<
     Record<string, Record<string, unknown>[]>
   >({});
   const [loadingPanels, setLoadingPanels] = useState<Set<string>>(new Set());
 
-  // Track panel IDs to avoid refetching when panels haven't changed
-  const prevPanelIdsRef = useRef<string>("");
+  // Edit mode: working copy of panels
+  const [editPanels, setEditPanels] = useState<Panel[]>([]);
+  const [dirty, setDirty] = useState(false);
 
-  // Fetch data for panels in parallel
+  // Panel editor state
+  const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
+
+  // Track original panels for discard
+  const originalPanelsRef = useRef<Panel[]>([]);
+
+  // Fetch view configuration
+  const fetchView = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/views/${shareToken}`);
+      const data = await res.json();
+
+      if (!data.success) {
+        setError(data.message || "Failed to load view");
+        return;
+      }
+
+      setView(data.view);
+      setSchema(data.schema_def);
+      setPermissions(data.permissions ?? []);
+    } catch {
+      setError("Failed to load view");
+    } finally {
+      setLoading(false);
+    }
+  }, [shareToken]);
+
+  // Fetch data for each panel in parallel
   const fetchPanelData = useCallback(
     async (panels: Panel[]) => {
       const newLoadingPanels = new Set(panels.map((p) => p.id));
@@ -86,86 +116,79 @@ export default function ViewDashboard({
     [shareToken],
   );
 
-  // When view loads (read mode), fetch panel data
   useEffect(() => {
-    if (!view || editMode) return;
+    fetchView();
+  }, [fetchView]);
+
+  // When view loads, fetch panel data
+  useEffect(() => {
+    if (!view) return;
     const layout = view.layout_config as LayoutConfig;
     const panels = layout?.panels ?? [];
     if (panels.length > 0) {
       fetchPanelData(panels);
     }
-  }, [view, editMode, fetchPanelData]);
+  }, [view, fetchPanelData]);
 
-  // Sync editPanels when entering edit mode
+  // Enter edit mode: snapshot panels
   useEffect(() => {
     if (editMode && view) {
       const layout = view.layout_config as LayoutConfig;
-      setEditPanels(structuredClone(layout?.panels ?? []));
-      setSaveError("");
+      const panels = layout?.panels ?? [];
+      setEditPanels([...panels]);
+      originalPanelsRef.current = [...panels];
+      setDirty(false);
     }
   }, [editMode, view]);
 
-  // Fetch data for edit panels when their IDs change
-  useEffect(() => {
-    if (!editMode) return;
-    const panelIds = editPanels.map((p) => p.id).join(",");
-    if (panelIds === prevPanelIdsRef.current) return;
-    prevPanelIdsRef.current = panelIds;
-    if (editPanels.length > 0) {
-      fetchPanelData(editPanels);
-    }
-  }, [editMode, editPanels, fetchPanelData]);
+  const displayPanels = editMode
+    ? editPanels
+    : ((view?.layout_config as LayoutConfig)?.panels ?? []);
 
-  // URL sync for edit mode
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    if (editMode) {
-      url.searchParams.set("edit", "true");
-    } else {
-      url.searchParams.delete("edit");
-    }
-    window.history.replaceState({}, "", url.toString());
-  }, [editMode]);
+  // Find a "key metric" panel for the hero section
+  const metricPanel = displayPanels.find((p) => p.chart_type === "metric");
+  const metricValue = metricPanel ? panelData[metricPanel.id]?.[0] : null;
 
-  // Permission check: can this user edit?
-  const isOwner = !!(userId && view?.created_by === userId);
-  const hasWriteGrant = permissions.some(
-    (p) =>
-      p.principal_id === userId &&
-      (p.permission === "write" || p.permission === "admin"),
-  );
-  const canEdit = isOwner || hasWriteGrant || isAdmin;
+  // Edit operations
+  const handleAddPanel = useCallback(() => {
+    const newPanel: Panel = {
+      id: `panel-${crypto.randomUUID()}`,
+      title: "New Panel",
+      chart_type: "bar" as ChartType,
+      position: { x: 0, y: 0, w: 3, h: 2 },
+      chart_config: { x_axis: "name", y_axis: "value" },
+      query_config: {},
+    };
+    setEditPanels((prev) => [...prev, newPanel]);
+    setDirty(true);
+  }, []);
 
-  // Panel mutation callbacks
   const handleRemovePanel = useCallback((panelId: string) => {
     setEditPanels((prev) => prev.filter((p) => p.id !== panelId));
+    setDirty(true);
   }, []);
 
-  const handleAddPanel = useCallback((panel: Panel) => {
-    setEditPanels((prev) => [...prev, panel]);
+  const handleEditPanel = useCallback((panelId: string) => {
+    setEditingPanelId(panelId);
   }, []);
 
-  const handleEditPanel = useCallback(
-    (panelId: string) => {
-      const panel = editPanels.find((p) => p.id === panelId);
-      if (panel) {
-        setEditingPanel(panel);
-        setAddPanelModalOpen(true);
-      }
-    },
-    [editPanels],
-  );
-
-  const handleUpdatePanel = useCallback((updatedPanel: Panel) => {
+  const handleApplyPanelEdit = useCallback((updated: Panel) => {
     setEditPanels((prev) =>
-      prev.map((p) => (p.id === updatedPanel.id ? updatedPanel : p)),
+      prev.map((p) => (p.id === updated.id ? updated : p)),
     );
+    setEditingPanelId(null);
+    setDirty(true);
   }, []);
 
-  // Save layout via PATCH
+  const handleDiscard = useCallback(() => {
+    setEditPanels([...originalPanelsRef.current]);
+    setDirty(false);
+    setEditMode(false);
+  }, []);
+
   const handleSave = useCallback(async () => {
-    setIsSaving(true);
-    setSaveError("");
+    if (!view) return;
+    setSaving(true);
     try {
       const res = await fetch(`/api/views/${shareToken}`, {
         method: "PATCH",
@@ -178,39 +201,20 @@ export default function ViewDashboard({
         }),
       });
       const data = await res.json();
-      if (!data.success) {
-        setSaveError(data.message || "Save failed");
-        return;
+      if (data.success) {
+        // Refresh view from server
+        await fetchView();
+        setEditMode(false);
+        setDirty(false);
       }
-      await refresh();
-      setEditMode(false);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Save failed");
+    } catch {
+      // silent fail — user sees unsaved state
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
-  }, [shareToken, editPanels, refresh]);
+  }, [view, shareToken, editPanels, fetchView]);
 
-  // Discard changes
-  const handleDiscard = useCallback(() => {
-    const layout = view?.layout_config as LayoutConfig;
-    setEditPanels(layout?.panels ?? []);
-    setEditMode(false);
-    setSaveError("");
-  }, [view]);
-
-  // Display panels: edit mode uses local state, view mode uses server state
-  const serverPanels = (view?.layout_config as LayoutConfig)?.panels ?? [];
-  const displayPanels = editMode ? editPanels : serverPanels;
-
-  // Find a "key metric" panel for the hero section
-  const metricPanel = displayPanels.find((p) => p.chart_type === "metric");
-  const metricValue = metricPanel ? panelData[metricPanel.id]?.[0] : null;
-
-  // Schema fields for the add panel modal (populated in Phase 5 with schema introspection)
-  const schemaFields: string[] = [];
-
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-charcoal">
         <div className="w-8 h-8 border-2 border-coral/30 border-t-coral rounded-full animate-spin" />
@@ -218,11 +222,11 @@ export default function ViewDashboard({
     );
   }
 
-  if (isError || !view) {
+  if (error || !view) {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-charcoal gap-4">
         <div className="text-white/40 text-sm font-mono tracking-widest uppercase">
-          {errorMessage || "View not found"}
+          {error || "View not found"}
         </div>
         <Link
           href="/"
@@ -251,51 +255,55 @@ export default function ViewDashboard({
             </Link>
             <span className="text-white/20">/</span>
             <span className="text-offwhite">{view.name}</span>
+            {editMode && (
+              <span className="px-2 py-0.5 bg-coral/10 text-coral text-[9px] tracking-widest">
+                EDITING
+              </span>
+            )}
           </div>
 
-          {/* Edit controls */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             {editMode ? (
               <>
-                <span className="px-3 py-1 bg-coral/10 text-coral text-[9px] tracking-widest uppercase font-mono border border-coral/20">
-                  Editing
-                </span>
-                {saveError && (
-                  <span className="text-coral text-[9px] font-mono max-w-[200px] truncate">
-                    {saveError}
-                  </span>
-                )}
                 <button
                   onClick={handleDiscard}
-                  disabled={isSaving}
-                  className="flex items-center gap-1.5 px-4 py-1.5 text-[10px] tracking-widest uppercase font-mono text-white/40 hover:text-white border border-white/10 hover:border-white/20 transition-colors disabled:opacity-50"
+                  className="text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
                 >
-                  <X className="w-3 h-3" />
                   Discard
                 </button>
                 <button
                   onClick={handleSave}
-                  disabled={isSaving}
-                  className="flex items-center gap-1.5 px-4 py-1.5 text-[10px] tracking-widest uppercase font-mono bg-coral text-charcoal hover:bg-coral/90 transition-colors disabled:opacity-50"
+                  disabled={saving || !dirty}
+                  className="flex items-center gap-2 px-4 py-1.5 bg-coral text-charcoal text-xs font-mono tracking-widest uppercase hover:bg-coral/90 transition-colors disabled:opacity-50"
                 >
-                  {isSaving ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <Save className="w-3 h-3" />
-                  )}
-                  Save
+                  {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+                  Save Layout
                 </button>
               </>
             ) : (
-              canEdit && (
+              <>
+                <button
+                  onClick={() => setShareDialogOpen(true)}
+                  className="flex items-center gap-2 text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
+                >
+                  <Share2 className="w-3 h-3" />
+                  Share
+                </button>
+                <button
+                  onClick={() => setChatOpen(!chatOpen)}
+                  className="flex items-center gap-2 text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
+                >
+                  <MessageCircle className="w-3 h-3" />
+                  Comments
+                </button>
                 <button
                   onClick={() => setEditMode(true)}
-                  className="flex items-center gap-1.5 px-4 py-1.5 text-[10px] tracking-widest uppercase font-mono text-white/40 hover:text-coral border border-white/10 hover:border-coral/30 transition-colors"
+                  className="flex items-center gap-2 text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
                 >
                   <Pencil className="w-3 h-3" />
                   Edit
                 </button>
-              )
+              </>
             )}
           </div>
         </header>
@@ -303,7 +311,7 @@ export default function ViewDashboard({
         <div className="flex-1 overflow-y-auto no-scrollbar relative scroll-smooth">
           {/* Hero section */}
           <section className="min-h-[25vh] flex flex-col justify-end px-8 md:px-12 pb-8 border-b border-white/10 relative overflow-hidden">
-            <div className="absolute top-0 right-20 w-px h-full bg-white/5" />
+            <div className="absolute top-0 right-20 w-[1px] h-full bg-white/5" />
             <div className="flex items-end justify-between relative z-10">
               <div>
                 <h1 className="text-[clamp(3rem,8vw,8rem)] leading-[0.85] font-display text-sage uppercase tracking-tight">
@@ -340,10 +348,7 @@ export default function ViewDashboard({
             editMode={editMode}
             onRemovePanel={handleRemovePanel}
             onEditPanel={handleEditPanel}
-            onAddPanel={() => {
-              setEditingPanel(undefined);
-              setAddPanelModalOpen(true);
-            }}
+            onAddPanel={handleAddPanel}
           />
 
           {/* Footer */}
@@ -364,41 +369,66 @@ export default function ViewDashboard({
               </span>
             </div>
           </footer>
+
+          {/* Edit mode footer */}
+          {editMode && (
+            <div className="sticky bottom-0 bg-charcoal-light border-t border-white/10 px-8 py-4 flex items-center justify-between z-30">
+              <button
+                onClick={handleDiscard}
+                className="text-xs font-mono tracking-widest text-white/40 hover:text-white transition-colors uppercase"
+              >
+                EXIT EDIT MODE
+              </button>
+              <span className="text-[10px] font-mono tracking-widest text-coral/60 uppercase">
+                {dirty ? "SESSION: UNSAVED CHANGES" : "SESSION: NO CHANGES"}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Edit mode toolbar */}
+        {/* Floating toolbar (edit mode only) */}
         {editMode && (
           <EditToolbar
             panelCount={editPanels.length}
-            onAddChart={() => {
-              setEditingPanel(undefined);
-              setAddPanelModalOpen(true);
-            }}
+            onAddChart={handleAddPanel}
           />
         )}
       </main>
 
-      {/* Add/Edit Panel Modal — key forces remount to reset form state */}
-      {addPanelModalOpen && (
-        <AddPanelModal
-          key={editingPanel?.id ?? "new"}
-          open={addPanelModalOpen}
-          onClose={() => {
-            setAddPanelModalOpen(false);
-            setEditingPanel(undefined);
-          }}
-          onAdd={(panel) => {
-            if (editingPanel) {
-              handleUpdatePanel(panel);
-            } else {
-              handleAddPanel(panel);
-            }
-          }}
-          existingPanel={editingPanel}
-          existingPanels={editPanels}
-          schemaFields={schemaFields}
-        />
-      )}
+      {/* Share dialog */}
+      <ShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        shareToken={shareToken}
+        viewId={view.id}
+        permissions={permissions}
+        visibility={view.visibility ?? "public"}
+        createdBy={view.created_by ?? ""}
+      />
+
+      {/* Chat panel */}
+      <ChatPanel
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        viewName={view.name}
+        currentUserEmail=""
+      />
+
+      {/* Panel editor overlay */}
+      {editingPanelId && (() => {
+        const editingPanel = editPanels.find((p) => p.id === editingPanelId);
+        if (!editingPanel) return null;
+        return (
+          <PanelEditor
+            panel={editingPanel}
+            panelData={panelData[editingPanelId] ?? []}
+            shareToken={shareToken}
+            schemaFields={[]}
+            onApply={handleApplyPanelEdit}
+            onCancel={() => setEditingPanelId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

@@ -24,8 +24,6 @@ export default async function ViewPage({ params, searchParams }: ViewPageProps) 
     <ViewDashboard
       shareToken={shareToken}
       initialEditMode={isEditMode}
-      userId={userId}
-      isAdmin={isAdmin}
     />
   );
 }

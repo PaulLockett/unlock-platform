@@ -51,11 +51,9 @@ export async function GET(
       }
     }
 
-    // Visibility-dependent caching
-    const cacheHeader =
-      view?.visibility === "public"
-        ? "public, max-age=120, stale-while-revalidate=300"
-        : "private, max-age=60, stale-while-revalidate=120";
+    // No CDN caching — panels change frequently during edit sessions.
+    // The SWR hook deduplicates client-side requests.
+    const cacheHeader = "private, no-cache, no-store, must-revalidate";
 
     return NextResponse.json(result, {
       headers: { "Cache-Control": cacheHeader },
@@ -124,6 +122,8 @@ export async function PATCH(
     }
 
     // Update via configure workflow (mutations stay on Temporal)
+    // Pass existing view_id and share_token so activate_view updates
+    // the existing view instead of creating a new one.
     const client = await getTemporalClient();
     const result = await client.workflow.execute("ConfigureWorkflow", {
       taskQueue: TASK_QUEUES.DATA_MANAGER,
@@ -141,6 +141,8 @@ export async function PATCH(
           layout_config: parsed.data.layout_config ?? view.layout_config ?? {},
           visibility: parsed.data.visibility ?? view.visibility ?? "public",
           created_by: view.created_by ?? user.id,
+          view_id: view.id,
+          share_token: shareToken,
         },
       ],
     });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   X,
   ArrowRight,
@@ -11,8 +11,11 @@ import {
   Filter,
   Table,
   Hash,
+  Database,
+  Loader2,
 } from "lucide-react";
 import type { Panel, ChartType } from "@/types/platform";
+import { detectFieldTypes } from "@/lib/transform-data";
 
 interface AddPanelModalProps {
   open: boolean;
@@ -21,6 +24,8 @@ interface AddPanelModalProps {
   existingPanel?: Panel;
   existingPanels?: Panel[];
   schemaFields?: string[];
+  shareToken: string;
+  availableSources?: { key: string; record_count: number; sample_fields: string[] }[];
 }
 
 const CHART_TYPES: { type: ChartType; label: string; icon: React.ReactNode }[] =
@@ -46,6 +51,9 @@ export default function AddPanelModal({
   onAdd,
   existingPanel,
   existingPanels = [],
+  schemaFields = [],
+  shareToken,
+  availableSources = [],
 }: AddPanelModalProps) {
   const isEditing = !!existingPanel;
 
@@ -62,11 +70,76 @@ export default function AddPanelModal({
       "",
   );
   const [width, setWidth] = useState(existingPanel?.position.w ?? 3);
+  const [sourceKey, setSourceKey] = useState(
+    existingPanel?.query_config.source_key ?? "",
+  );
   const [error, setError] = useState("");
+
+  // Auto-select the only available source
+  useEffect(() => {
+    if (availableSources.length === 1 && !sourceKey) {
+      setSourceKey(availableSources[0].key);
+    }
+  }, [availableSources, sourceKey]);
+
+  // Fetch live data to discover fields — only when a source is selected
+  const [liveData, setLiveData] = useState<Record<string, unknown>[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
+
+  useEffect(() => {
+    if (!open || !sourceKey) return;
+    let cancelled = false;
+    const doFetch = async () => {
+      setLoadingData(true);
+      try {
+        const r = await fetch("/api/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            share_token: shareToken,
+            source_key: sourceKey || null,
+            limit: 20,
+            offset: 0,
+          }),
+        });
+        const data = await r.json();
+        if (!cancelled && data.success && data.records) {
+          setLiveData(data.records);
+        }
+      } catch {
+        // ignore fetch errors
+      } finally {
+        if (!cancelled) setLoadingData(false);
+      }
+    };
+    doFetch();
+    return () => { cancelled = true; };
+  }, [open, shareToken, sourceKey]);
+
+  // Detect fields from live data
+  const fieldTypes = useMemo(() => detectFieldTypes(liveData), [liveData]);
+  const dataFields = useMemo(() => {
+    if (liveData.length > 0) return Object.keys(liveData[0]);
+    return [];
+  }, [liveData]);
+
+  // Merge schema fields + data fields, deduplicated
+  const allFields = useMemo(() => {
+    const merged = new Set([...schemaFields, ...dataFields]);
+    return [...merged].sort();
+  }, [schemaFields, dataFields]);
+
+  const numericFields = useMemo(() => {
+    return allFields.filter((f) => fieldTypes.get(f) === "number");
+  }, [allFields, fieldTypes]);
 
   const handleSubmit = () => {
     if (!title.trim()) {
       setError("Panel title is required");
+      return;
+    }
+    if (!sourceKey && availableSources.length > 0) {
+      setError("Select a data source");
       return;
     }
 
@@ -104,7 +177,9 @@ export default function AddPanelModal({
             }
           : {}),
       },
-      query_config: {},
+      query_config: {
+        source_key: sourceKey || null,
+      },
     };
 
     // When editing, preserve the existing position
@@ -154,6 +229,50 @@ export default function AddPanelModal({
 
         {/* Form */}
         <div className="p-8 space-y-6">
+          {/* Data Source */}
+          <div>
+            <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
+              Data Source
+            </label>
+            {availableSources.length > 0 ? (
+              <select
+                value={sourceKey}
+                onChange={(e) => setSourceKey(e.target.value)}
+                className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors appearance-none"
+              >
+                <option value="">— Auto-detect —</option>
+                {availableSources.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.key} ({s.record_count} records)
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="flex items-center gap-2 px-4 py-3 bg-charcoal border border-white/10 text-sm font-mono text-white/40">
+                <Database className="w-4 h-4" />
+                {loadingData ? "Loading data..." : "Auto-detect"}
+              </div>
+            )}
+          </div>
+
+          {/* Field status indicator */}
+          {loadingData ? (
+            <div className="flex items-center gap-2 text-[9px] font-mono text-white/25 tracking-wider">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Loading fields from data source...
+            </div>
+          ) : allFields.length > 0 ? (
+            <div className="flex items-center gap-2 px-3 py-2 bg-white/[0.02] border border-white/5 text-[9px] font-mono text-white/30 tracking-wider">
+              <Database className="w-3 h-3" />
+              {allFields.length} fields available
+              {numericFields.length > 0 && (
+                <span className="text-coral">
+                  ({numericFields.length} numeric)
+                </span>
+              )}
+            </div>
+          ) : null}
+
           {/* Title */}
           <div>
             <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
@@ -194,32 +313,42 @@ export default function AddPanelModal({
             </div>
           </div>
 
-          {/* Axis fields — shown for non-metric types */}
+          {/* Axis fields — always dropdowns when fields are available */}
           {chartType !== "metric" && chartType !== "pie" ? (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
                   X-Axis Field
                 </label>
-                <input
-                  type="text"
+                <select
                   value={xAxis}
                   onChange={(e) => setXAxis(e.target.value)}
-                  placeholder="date"
-                  className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
-                />
+                  className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors appearance-none"
+                >
+                  <option value="">— Select field —</option>
+                  {allFields.map((f) => (
+                    <option key={f} value={f}>
+                      {f}{fieldTypes.has(f) ? ` (${fieldTypes.get(f)})` : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
                   Y-Axis Field
                 </label>
-                <input
-                  type="text"
+                <select
                   value={yAxis}
                   onChange={(e) => setYAxis(e.target.value)}
-                  placeholder="reach"
-                  className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
-                />
+                  className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors appearance-none"
+                >
+                  <option value="">— Select field —</option>
+                  {(numericFields.length > 0 ? numericFields : allFields).map((f) => (
+                    <option key={f} value={f}>
+                      {f}{fieldTypes.has(f) ? ` (${fieldTypes.get(f)})` : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           ) : (
@@ -227,13 +356,18 @@ export default function AddPanelModal({
               <label className="block text-[10px] tracking-widest text-white/40 uppercase font-mono mb-2">
                 Value Field
               </label>
-              <input
-                type="text"
+              <select
                 value={yAxis}
                 onChange={(e) => setYAxis(e.target.value)}
-                placeholder="reach"
-                className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite placeholder-white/20 focus:outline-none focus:border-coral transition-colors"
-              />
+                className="w-full bg-charcoal border border-white/10 px-4 py-3 text-sm font-mono text-offwhite focus:outline-none focus:border-coral transition-colors appearance-none"
+              >
+                <option value="">— Select field —</option>
+                {(numericFields.length > 0 ? numericFields : allFields).map((f) => (
+                  <option key={f} value={f}>
+                    {f}{fieldTypes.has(f) ? ` (${fieldTypes.get(f)})` : ""}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 

@@ -7,6 +7,10 @@ on:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
 
+concurrency:
+  group: api-perf-${{ github.head_ref }}
+  cancel-in-progress: true
+
 permissions:
   pull-requests: write
   deployments: read

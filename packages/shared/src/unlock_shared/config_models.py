@@ -166,6 +166,9 @@ class ActivateViewRequest(BaseModel):
     filters: dict[str, str | int | float | bool | None] = {}
     layout_config: dict[str, Any] = {}
     created_by: str | None = None
+    # Optional: pass existing IDs to update instead of create
+    view_id: str | None = None
+    share_token: str | None = None
 
 
 class ActivateViewResult(PlatformResult):

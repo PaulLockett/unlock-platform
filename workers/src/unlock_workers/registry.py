@@ -28,6 +28,7 @@ from unlock_access_engine.workflows import (
 from unlock_config_access.activities import (
     activate_view,
     archive_schema,
+    cache_source_records,
     clone_view,
     define_pipeline,
     grant_access,
@@ -180,6 +181,7 @@ COMPONENTS: dict[str, ComponentConfig] = {
             clone_view,
             archive_schema,
             survey_configs,
+            cache_source_records,
         ],
     ),
     "schema-engine": ComponentConfig(

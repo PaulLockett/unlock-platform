@@ -129,11 +129,11 @@ describe("GET /api/views/[shareToken]", () => {
     await expectJson(res, 200);
 
     expect(res.headers.get("Cache-Control")).toBe(
-      "public, max-age=120, stale-while-revalidate=300",
+      "private, no-cache, no-store, must-revalidate",
     );
   });
 
-  it("returns private Cache-Control for private view", async () => {
+  it("returns no-store Cache-Control for private view", async () => {
     mocks.mockRetrieveView.mockResolvedValue({
       success: true,
       view: { ...baseView, visibility: "private" },
@@ -145,7 +145,7 @@ describe("GET /api/views/[shareToken]", () => {
     await expectJson(res, 200);
 
     expect(res.headers.get("Cache-Control")).toBe(
-      "private, max-age=60, stale-while-revalidate=120",
+      "private, no-cache, no-store, must-revalidate",
     );
   });
 

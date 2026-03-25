@@ -1026,7 +1026,64 @@ def run_test() -> dict:
                     ),
                 )
 
-            # --- Flow 7: Cleanup — delete the test view ---
+            # --- Flow 7: PATCH chart_config (edit panel axis) ---
+            if share_token:
+                edit_config_result = page.evaluate(
+                    """
+                    async (shareToken) => {
+                        // Get current view to read panels
+                        const getRes = await fetch('/api/views/' + shareToken);
+                        const getData = await getRes.json();
+                        const panels = getData?.view?.layout_config?.panels || [];
+                        if (panels.length === 0) {
+                            return { status: 0, error: 'no panels' };
+                        }
+                        // Modify first panel's y_axis from 'reach' to 'impressions'
+                        const updated = [...panels];
+                        updated[0] = {
+                            ...updated[0],
+                            chart_config: {
+                                ...updated[0].chart_config,
+                                y_axis: 'impressions'
+                            }
+                        };
+                        const patchRes = await fetch(
+                            '/api/views/' + shareToken,
+                            {
+                                method: 'PATCH',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    layout_config: {
+                                        grid_columns: 6,
+                                        panels: updated
+                                    }
+                                })
+                            }
+                        );
+                        const patchData = await patchRes.json().catch(
+                            () => ({ error: 'non-JSON' })
+                        );
+                        return {
+                            status: patchRes.status,
+                            body: patchData,
+                            new_y_axis: updated[0].chart_config.y_axis
+                        };
+                    }
+                """,
+                    share_token,
+                )
+                warn(
+                    "PATCH modified panel chart_config",
+                    passed=edit_config_result["status"] == 200,
+                    detail=(
+                        f"status={edit_config_result['status']} "
+                        f"new_y_axis={edit_config_result.get('new_y_axis')}"
+                    ),
+                )
+
+            # --- Flow 8: Cleanup — delete the test view ---
             if share_token:
                 # Deactivate by setting status to "deleted" via PATCH
                 # (the platform uses soft deletes via config update)
