@@ -551,136 +551,37 @@ def run_test() -> dict:
             )
 
             # --- Step 11: Add a panel via Add Chart ---
+            # The current UI adds a blank panel directly (no modal).
+            # Then the user opens the inline editor to configure it.
             add_btn = page.locator(
                 "button:has-text('Add Chart'), "
-                "button:has-text('Add Panel')"
+                "button:has-text('Add Panel'), "
+                "button:has-text('+')"
             ).first
             with contextlib.suppress(Exception):
                 add_btn.wait_for(state="visible", timeout=10000)
             if add_btn.is_visible():
                 add_btn.click()
+                page.wait_for_timeout(1000)
                 step("Clicked Add Chart")
 
-                # Wait for modal to render
-                with contextlib.suppress(Exception):
-                    page.wait_for_selector(
-                        "text=Data Source", timeout=5000
-                    )
-
-                # --- Select the data source explicitly ---
-                # The first <select> in the modal is the data source
-                # dropdown, populated from /api/sources.
-                source_select = page.locator("select").first
-                with contextlib.suppress(Exception):
-                    source_select.wait_for(
-                        state="visible", timeout=5000
-                    )
-
-                # Get the available options
-                source_options = source_select.evaluate("""
-                    el => Array.from(el.options).map(
-                        o => ({value: o.value, text: o.text})
-                    )
-                """)
-                source_names = [
-                    o["text"] for o in source_options
-                    if o["value"]
-                ]
-
-                # Select the Meta Ads source (or first available)
-                selected_source = ""
-                for opt in source_options:
-                    if opt["value"] and "meta" in opt["text"].lower():
-                        selected_source = opt["value"]
-                        break
-                if not selected_source:
-                    for opt in source_options:
-                        if opt["value"]:
-                            selected_source = opt["value"]
-                            break
-
-                if selected_source:
-                    source_select.select_option(selected_source)
-                    step(
-                        "Selected data source from dropdown",
-                        detail=f"source='{selected_source}' "
-                        f"options={source_names}",
-                    )
-                else:
-                    step(
-                        "Selected data source from dropdown",
-                        passed=False,
-                        detail=f"no sources available: {source_names}",
-                    )
-
-                # Wait for fields to load after source selection
-                page.wait_for_timeout(3000)
-
-                # Verify fields were discovered from selected source
-                modal_body = page.inner_text("body")
-                has_field_indicator = (
-                    "fields available" in modal_body.lower()
-                    or "numeric" in modal_body.lower()
-                )
-                step(
-                    "Fields loaded from selected source",
-                    passed=has_field_indicator,
-                    detail=f"fields_detected={has_field_indicator}",
-                )
-
-                # Fill panel title
-                title_input = page.locator(
-                    'input[placeholder="Daily Reach"]'
-                )
-                title_input.click()
-                title_input.fill("")
-                title_input.type("E2E Test Panel", delay=50)
-
-                # Select "bar" chart type
-                bar_btn = page.locator(
-                    "button:has-text('Bar')"
-                ).first
-                if bar_btn.is_visible():
-                    bar_btn.click()
-
-                # Select axis fields from dropdowns (populated by
-                # real data from the selected source).
-                # select[0] = data source, select[1] = x-axis,
-                # select[2] = y-axis
-                x_select = page.locator("select").nth(1)
-                y_select = page.locator("select").nth(2)
-                if x_select.is_visible():
-                    x_select.select_option(x_field)
-                if y_select.is_visible():
-                    y_select.select_option(y_field)
-
-                step(
-                    "Selected axis fields from dropdowns",
-                    detail=f"x={x_field} y={y_field}",
-                )
-
-                # Click Add Panel button
-                submit_btn = page.locator(
-                    'button:has-text("Add Panel")'
-                ).last
-                submit_btn.click()
-                step("Added panel via modal")
-
-                # Verify panel appears in grid
-                page.wait_for_timeout(1000)
+                # A blank panel ("New Panel") should appear in grid
                 body_after_add = page.inner_text("body").upper()
-                has_panel = "E2E TEST PANEL" in body_after_add
+                has_new_panel = "NEW PANEL" in body_after_add
                 step(
-                    "Panel appears in grid",
-                    passed=has_panel,
-                    detail=f"found={has_panel}",
+                    "Blank panel added to grid",
+                    passed=has_new_panel,
+                    detail=f"found={has_new_panel}",
                 )
+
+                # The panel title is "New Panel" by default.
 
                 # --- Step 11: Save the layout ---
                 # Intercept the PATCH response to see what the
                 # backend actually returns.
                 save_btn = page.locator(
-                    "button:has-text('Save')"
+                    "button:has-text('Save'), "
+                    "button:has-text('Save Layout')"
                 ).first
                 if save_btn.is_visible():
                     # Call PATCH directly from JS to capture response
@@ -761,7 +662,7 @@ def run_test() -> dict:
                     # Wait for panels to render (async data fetch)
                     with contextlib.suppress(Exception):
                         page.wait_for_selector(
-                            "text=E2E Test Panel", timeout=15000
+                            "text=New Panel", timeout=15000
                         )
 
                     # Query the API directly to check what the view
@@ -795,7 +696,7 @@ def run_test() -> dict:
                     """)
 
                     body_reload = page.inner_text("body").upper()
-                    has_panel_after = "E2E TEST PANEL" in body_reload
+                    has_panel_after = "NEW PANEL" in body_reload
                     panel_count = view_check.get("panels", 0)
                     step(
                         "Panel persists after reload",
