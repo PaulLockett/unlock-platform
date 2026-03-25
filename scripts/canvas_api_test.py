@@ -1026,7 +1026,6 @@ def run_test() -> dict:
                     ),
                 )
 
-<<<<<<< HEAD
             # --- Flow 7: PATCH chart_config (edit panel axis) ---
             if share_token:
                 edit_config_result = page.evaluate(
@@ -1085,9 +1084,6 @@ def run_test() -> dict:
                 )
 
             # --- Flow 8: Cleanup — delete the test view ---
-=======
-            # --- Flow 7: Cleanup — delete the test view ---
->>>>>>> origin/main
             if share_token:
                 # Deactivate by setting status to "deleted" via PATCH
                 # (the platform uses soft deletes via config update)

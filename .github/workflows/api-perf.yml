@@ -6,13 +6,10 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
-<<<<<<< HEAD
 
 concurrency:
   group: api-perf-${{ github.head_ref }}
   cancel-in-progress: true
-=======
->>>>>>> origin/main
 
 permissions:
   pull-requests: write
