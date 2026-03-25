@@ -425,6 +425,8 @@ export default function ViewDashboard({
           existingPanel={editingPanel}
           existingPanels={editPanels}
           schemaFields={schemaFields}
+          shareToken={shareToken}
+          availableSources={availableSources}
         />
       )}
 

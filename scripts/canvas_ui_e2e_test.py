@@ -561,11 +561,27 @@ def run_test() -> dict:
                 add_btn.click()
                 step("Clicked Add Chart")
 
-                # Fill the add panel modal
+                # Wait for modal and data to load (modal fetches
+                # fields from /api/query on open)
                 with contextlib.suppress(Exception):
                     page.wait_for_selector(
                         "text=Panel Title", timeout=5000
                     )
+
+                # Wait for field dropdowns to populate from live data
+                page.wait_for_timeout(3000)
+
+                # Verify fields were discovered from real data
+                modal_body = page.inner_text("body")
+                has_field_indicator = (
+                    "fields available" in modal_body.lower()
+                    or "numeric" in modal_body.lower()
+                )
+                step(
+                    "Add panel modal loaded with live fields",
+                    passed=has_field_indicator,
+                    detail=f"fields_detected={has_field_indicator}",
+                )
 
                 title_input = page.locator(
                     'input[placeholder="Daily Reach"]'
@@ -581,18 +597,20 @@ def run_test() -> dict:
                 if bar_btn.is_visible():
                     bar_btn.click()
 
-                # Fill axis fields using discovered field names
-                x_input = page.locator(
-                    'input[placeholder="date"]'
-                )
-                if x_input.is_visible():
-                    x_input.fill(x_field)
+                # Select axis fields from dropdowns (populated by
+                # real data from /api/query, not typed manually).
+                # The modal now has <select> elements for X and Y.
+                x_select = page.locator("select").nth(1)  # after source
+                y_select = page.locator("select").nth(2)
+                if x_select.is_visible():
+                    x_select.select_option(x_field)
+                if y_select.is_visible():
+                    y_select.select_option(y_field)
 
-                y_input = page.locator(
-                    'input[placeholder="reach"]'
-                ).first
-                if y_input.is_visible():
-                    y_input.fill(y_field)
+                step(
+                    "Selected axis fields from dropdowns",
+                    detail=f"x={x_field} y={y_field}",
+                )
 
                 # Click Add Panel button
                 submit_btn = page.locator(
