@@ -116,6 +116,11 @@ class TestLiveScheduleLifecycle:
 
             # 7. List — should include our schedule. Temporal's visibility store
             # has eventual consistency (~2-5s in practice), so retry with backoff.
+<<<<<<< HEAD
+=======
+            import asyncio
+
+>>>>>>> origin/main
             listed = None
             found = []
             for attempt in range(8):

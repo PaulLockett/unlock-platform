@@ -119,10 +119,13 @@ class ConfigureRequest(BaseModel):
     schema_id: str = ""
     filters: dict[str, Any] = {}
     layout_config: dict[str, Any] = {}
+<<<<<<< HEAD
     visibility: str = "public"
     # For view updates: pass existing IDs to update instead of create
     view_id: str | None = None
     share_token: str | None = None
+=======
+>>>>>>> origin/main
 
 
 class ConfigureResult(PlatformResult):

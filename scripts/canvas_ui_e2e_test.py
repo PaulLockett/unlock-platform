@@ -488,6 +488,7 @@ def run_test() -> dict:
                 detail=f"editing_badge={has_editing}",
             )
 
+<<<<<<< HEAD
             # --- Step 10: Discover available data fields ---
             # Query the API to find what fields exist in the data.
             # The raw data may have "Day"/"Reach" (unmapped) or
@@ -551,6 +552,11 @@ def run_test() -> dict:
             )
 
             # --- Step 11: Add a panel via Add Chart ---
+=======
+            # --- Step 10: Add a panel via Add Chart ---
+            # Look for the Add Chart button in the floating toolbar
+            # or the AddPanelButton in the grid.
+>>>>>>> origin/main
             add_btn = page.locator(
                 "button:has-text('Add Chart'), "
                 "button:has-text('Add Panel')"
@@ -561,6 +567,7 @@ def run_test() -> dict:
                 add_btn.click()
                 step("Clicked Add Chart")
 
+<<<<<<< HEAD
                 # Wait for modal to render
                 with contextlib.suppress(Exception):
                     page.wait_for_selector(
@@ -629,6 +636,14 @@ def run_test() -> dict:
                 )
 
                 # Fill panel title
+=======
+                # Fill the add panel modal
+                with contextlib.suppress(Exception):
+                    page.wait_for_selector(
+                        "text=Panel Title", timeout=5000
+                    )
+
+>>>>>>> origin/main
                 title_input = page.locator(
                     'input[placeholder="Daily Reach"]'
                 )
@@ -636,13 +651,18 @@ def run_test() -> dict:
                 title_input.fill("")
                 title_input.type("E2E Test Panel", delay=50)
 
+<<<<<<< HEAD
                 # Select "bar" chart type
+=======
+                # Select "bar" chart type (should be default, but click)
+>>>>>>> origin/main
                 bar_btn = page.locator(
                     "button:has-text('Bar')"
                 ).first
                 if bar_btn.is_visible():
                     bar_btn.click()
 
+<<<<<<< HEAD
                 # Select axis fields from dropdowns (populated by
                 # real data from the selected source).
                 # select[0] = data source, select[1] = x-axis,
@@ -658,6 +678,20 @@ def run_test() -> dict:
                     "Selected axis fields from dropdowns",
                     detail=f"x={x_field} y={y_field}",
                 )
+=======
+                # Fill axis fields
+                x_input = page.locator(
+                    'input[placeholder="date"]'
+                )
+                if x_input.is_visible():
+                    x_input.fill("date")
+
+                y_input = page.locator(
+                    'input[placeholder="reach"]'
+                ).first
+                if y_input.is_visible():
+                    y_input.fill("reach")
+>>>>>>> origin/main
 
                 # Click Add Panel button
                 submit_btn = page.locator(
@@ -677,12 +711,16 @@ def run_test() -> dict:
                 )
 
                 # --- Step 11: Save the layout ---
+<<<<<<< HEAD
                 # Intercept the PATCH response to see what the
                 # backend actually returns.
+=======
+>>>>>>> origin/main
                 save_btn = page.locator(
                     "button:has-text('Save')"
                 ).first
                 if save_btn.is_visible():
+<<<<<<< HEAD
                     # Call PATCH directly from JS to capture response
                     save_result = page.evaluate("""
                         async () => {
@@ -754,10 +792,21 @@ def run_test() -> dict:
                         current_url.split("?")[0],
                         wait_until="load",
                     )
+=======
+                    save_btn.click()
+                    # Wait for save to complete — editing badge disappears
+                    # or save button is re-enabled
+                    page.wait_for_timeout(5000)
+                    step("Saved layout")
+
+                    # Reload and verify persistence
+                    page.reload(wait_until="load")
+>>>>>>> origin/main
                     with contextlib.suppress(Exception):
                         page.wait_for_selector(
                             "text=Back to Views", timeout=30000
                         )
+<<<<<<< HEAD
                     # Wait for panels to render (async data fetch)
                     with contextlib.suppress(Exception):
                         page.wait_for_selector(
@@ -1068,6 +1117,15 @@ def run_test() -> dict:
                             passed=False,
                             detail="Pencil button not found on panel",
                         )
+=======
+                    body_reload = page.inner_text("body").upper()
+                    has_panel_after = "E2E TEST PANEL" in body_reload
+                    warn(
+                        "Panel persists after reload",
+                        passed=has_panel_after,
+                        detail=f"found={has_panel_after}",
+                    )
+>>>>>>> origin/main
             else:
                 warn(
                     "Add Chart button visible",
@@ -1075,7 +1133,11 @@ def run_test() -> dict:
                     detail="Button not found — edit mode may not be active",
                 )
 
+<<<<<<< HEAD
             # --- Step: Navigate back to home ---
+=======
+            # --- Step 12: Navigate back to home ---
+>>>>>>> origin/main
             back_link = page.locator("text=Back to Views").first
             back_link.click()
             page.wait_for_url("**/", timeout=15000)

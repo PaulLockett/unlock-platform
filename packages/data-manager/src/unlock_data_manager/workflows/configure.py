@@ -129,7 +129,10 @@ class ConfigureWorkflow:
                 name=request.name,
                 description=request.description,
                 schema_id=request.schema_id,
+<<<<<<< HEAD
                 visibility=request.visibility,
+=======
+>>>>>>> origin/main
                 filters=request.filters,
                 layout_config=request.layout_config,
                 created_by=request.created_by,
