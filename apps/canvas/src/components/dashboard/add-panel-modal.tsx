@@ -75,12 +75,19 @@ export default function AddPanelModal({
   );
   const [error, setError] = useState("");
 
-  // Fetch live data to discover fields
+  // Auto-select the only available source
+  useEffect(() => {
+    if (availableSources.length === 1 && !sourceKey) {
+      setSourceKey(availableSources[0].key);
+    }
+  }, [availableSources, sourceKey]);
+
+  // Fetch live data to discover fields — only when a source is selected
   const [liveData, setLiveData] = useState<Record<string, unknown>[]>([]);
   const [loadingData, setLoadingData] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !sourceKey) return;
     let cancelled = false;
     const doFetch = async () => {
       setLoadingData(true);
@@ -129,6 +136,10 @@ export default function AddPanelModal({
   const handleSubmit = () => {
     if (!title.trim()) {
       setError("Panel title is required");
+      return;
+    }
+    if (!sourceKey && availableSources.length > 0) {
+      setError("Select a data source");
       return;
     }
 

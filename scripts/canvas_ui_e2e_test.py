@@ -561,28 +561,74 @@ def run_test() -> dict:
                 add_btn.click()
                 step("Clicked Add Chart")
 
-                # Wait for modal and data to load (modal fetches
-                # fields from /api/query on open)
+                # Wait for modal to render
                 with contextlib.suppress(Exception):
                     page.wait_for_selector(
-                        "text=Panel Title", timeout=5000
+                        "text=Data Source", timeout=5000
                     )
 
-                # Wait for field dropdowns to populate from live data
+                # --- Select the data source explicitly ---
+                # The first <select> in the modal is the data source
+                # dropdown, populated from /api/sources.
+                source_select = page.locator("select").first
+                with contextlib.suppress(Exception):
+                    source_select.wait_for(
+                        state="visible", timeout=5000
+                    )
+
+                # Get the available options
+                source_options = source_select.evaluate("""
+                    el => Array.from(el.options).map(
+                        o => ({value: o.value, text: o.text})
+                    )
+                """)
+                source_names = [
+                    o["text"] for o in source_options
+                    if o["value"]
+                ]
+
+                # Select the Meta Ads source (or first available)
+                selected_source = ""
+                for opt in source_options:
+                    if opt["value"] and "meta" in opt["text"].lower():
+                        selected_source = opt["value"]
+                        break
+                if not selected_source:
+                    for opt in source_options:
+                        if opt["value"]:
+                            selected_source = opt["value"]
+                            break
+
+                if selected_source:
+                    source_select.select_option(selected_source)
+                    step(
+                        "Selected data source from dropdown",
+                        detail=f"source='{selected_source}' "
+                        f"options={source_names}",
+                    )
+                else:
+                    step(
+                        "Selected data source from dropdown",
+                        passed=False,
+                        detail=f"no sources available: {source_names}",
+                    )
+
+                # Wait for fields to load after source selection
                 page.wait_for_timeout(3000)
 
-                # Verify fields were discovered from real data
+                # Verify fields were discovered from selected source
                 modal_body = page.inner_text("body")
                 has_field_indicator = (
                     "fields available" in modal_body.lower()
                     or "numeric" in modal_body.lower()
                 )
                 step(
-                    "Add panel modal loaded with live fields",
+                    "Fields loaded from selected source",
                     passed=has_field_indicator,
                     detail=f"fields_detected={has_field_indicator}",
                 )
 
+                # Fill panel title
                 title_input = page.locator(
                     'input[placeholder="Daily Reach"]'
                 )
@@ -590,7 +636,7 @@ def run_test() -> dict:
                 title_input.fill("")
                 title_input.type("E2E Test Panel", delay=50)
 
-                # Select "bar" chart type (should be default, but click)
+                # Select "bar" chart type
                 bar_btn = page.locator(
                     "button:has-text('Bar')"
                 ).first
@@ -598,9 +644,10 @@ def run_test() -> dict:
                     bar_btn.click()
 
                 # Select axis fields from dropdowns (populated by
-                # real data from /api/query, not typed manually).
-                # The modal now has <select> elements for X and Y.
-                x_select = page.locator("select").nth(1)  # after source
+                # real data from the selected source).
+                # select[0] = data source, select[1] = x-axis,
+                # select[2] = y-axis
+                x_select = page.locator("select").nth(1)
                 y_select = page.locator("select").nth(2)
                 if x_select.is_visible():
                     x_select.select_option(x_field)
