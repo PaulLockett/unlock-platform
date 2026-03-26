@@ -11,10 +11,15 @@ import {
   HardDrive,
   Mail,
   Loader2,
+  Clock,
+  Pause,
+  Play,
+  Trash2,
 } from "lucide-react";
 import SideNav from "@/components/nav/side-nav";
 import SourceForm from "@/components/admin/source-form";
 import FileUpload from "@/components/admin/file-upload";
+import ScheduleModal from "@/components/admin/schedule-modal";
 
 type Protocol =
   | "rest_api"
@@ -55,6 +60,49 @@ export default function AdminSourcesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState<Protocol | null>(null);
   const [ingesting, setIngesting] = useState<string | null>(null);
+  const [schedulingSource, setSchedulingSource] = useState<DataSource | null>(null);
+  const [schedules, setSchedules] = useState<Record<string, {
+    is_paused: boolean;
+    cron_expression: string;
+    next_run_time: string;
+    schedule_id: string;
+  }>>({});
+  const [scheduleAction, setScheduleAction] = useState<string | null>(null);
+
+  const fetchSchedules = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/schedules");
+      const data = await res.json();
+      if (data.success && data.schedules) {
+        const map: typeof schedules = {};
+        for (const s of data.schedules) {
+          if (s.source_name) map[s.source_name] = s;
+        }
+        setSchedules(map);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const handleScheduleAction = useCallback(
+    async (sourceName: string, action: "pause" | "resume" | "cancel") => {
+      setScheduleAction(`${action}-${sourceName}`);
+      try {
+        await fetch("/api/admin/schedules", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source_name: sourceName, action }),
+        });
+        await fetchSchedules();
+      } catch {
+        // silent
+      } finally {
+        setScheduleAction(null);
+      }
+    },
+    [fetchSchedules],
+  );
 
   const fetchSources = useCallback(async () => {
     setLoading(true);
@@ -71,7 +119,8 @@ export default function AdminSourcesPage() {
 
   useEffect(() => {
     fetchSources();
-  }, [fetchSources]);
+    fetchSchedules();
+  }, [fetchSources, fetchSchedules]);
 
   const handleTriggerIngest = useCallback(
     async (source: DataSource) => {
@@ -206,66 +255,115 @@ export default function AdminSourcesPage() {
             ) : (
               <div className="space-y-2">
                 {/* Table header */}
-                <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-4 px-4 py-2 text-[10px] tracking-widest text-white/30 uppercase border-b border-white/5">
+                <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_2fr] gap-4 px-4 py-2 text-[10px] tracking-widest text-white/30 uppercase border-b border-white/5">
                   <span>Name</span>
                   <span>Protocol</span>
-                  <span>Service</span>
                   <span>Status</span>
-                  <span>Channel</span>
+                  <span>Schedule</span>
+                  <span>Next Run</span>
                   <span>Actions</span>
                 </div>
 
-                {sources.map((source) => (
-                  <div
-                    key={source.id}
-                    className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-4 px-4 py-3 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center"
-                  >
-                    <span className="text-sm text-offwhite font-mono truncate">
-                      {source.name}
-                    </span>
-                    <span className="text-xs text-white/40">
-                      {source.protocol.replace("_", " ").toUpperCase()}
-                    </span>
-                    <span className="text-xs text-white/40">
-                      {source.service ?? "—"}
-                    </span>
-                    <span>
-                      <span
-                        className={`inline-flex items-center gap-1.5 text-[10px] tracking-widest uppercase ${
-                          source.status === "active"
-                            ? "text-sage"
-                            : "text-white/30"
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            source.status === "active"
-                              ? "bg-sage"
-                              : "bg-white/20"
-                          }`}
-                        />
-                        {source.status}
+                {sources.map((source) => {
+                  const sched = schedules[source.name];
+                  return (
+                    <div
+                      key={source.id}
+                      className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_2fr] gap-4 px-4 py-3 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center"
+                    >
+                      <span className="text-sm text-offwhite font-mono truncate">
+                        {source.name}
                       </span>
-                    </span>
-                    <span className="text-xs text-white/40">
-                      {source.channel_key ?? "—"}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleTriggerIngest(source)}
-                        disabled={ingesting === source.id}
-                        className="flex items-center gap-1 text-[10px] tracking-widest text-coral hover:text-coral/80 transition-colors uppercase disabled:opacity-50"
-                      >
-                        {ingesting === source.id ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                      <span className="text-xs text-white/40">
+                        {source.protocol.replace("_", " ").toUpperCase()}
+                      </span>
+                      <span>
+                        <span
+                          className={`inline-flex items-center gap-1.5 text-[10px] tracking-widest uppercase ${
+                            source.status === "active"
+                              ? "text-sage"
+                              : "text-white/30"
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              source.status === "active"
+                                ? "bg-sage"
+                                : "bg-white/20"
+                            }`}
+                          />
+                          {source.status}
+                        </span>
+                      </span>
+                      <span className="text-[10px] text-white/40 tracking-wider">
+                        {sched ? (
+                          <span className={sched.is_paused ? "text-amber-400" : "text-sage"}>
+                            {sched.is_paused ? "PAUSED" : sched.cron_expression || "ACTIVE"}
+                          </span>
                         ) : (
-                          <RefreshCw className="w-3 h-3" />
+                          <span className="text-white/20">—</span>
                         )}
-                        Ingest
-                      </button>
+                      </span>
+                      <span className="text-[10px] text-white/30 tracking-wider">
+                        {sched?.next_run_time
+                          ? new Date(sched.next_run_time).toLocaleString()
+                          : "—"}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleTriggerIngest(source)}
+                          disabled={ingesting === source.id}
+                          className="flex items-center gap-1 text-[10px] tracking-widest text-coral hover:text-coral/80 transition-colors uppercase disabled:opacity-50"
+                        >
+                          {ingesting === source.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <RefreshCw className="w-3 h-3" />
+                          )}
+                          Ingest
+                        </button>
+                        {sched ? (
+                          <>
+                            <button
+                              onClick={() =>
+                                handleScheduleAction(
+                                  source.name,
+                                  sched.is_paused ? "resume" : "pause",
+                                )
+                              }
+                              disabled={scheduleAction === `${sched.is_paused ? "resume" : "pause"}-${source.name}`}
+                              className="flex items-center gap-1 text-[10px] tracking-widest text-white/40 hover:text-white transition-colors uppercase disabled:opacity-50"
+                            >
+                              {sched.is_paused ? (
+                                <Play className="w-3 h-3" />
+                              ) : (
+                                <Pause className="w-3 h-3" />
+                              )}
+                              {sched.is_paused ? "Resume" : "Pause"}
+                            </button>
+                            <button
+                              onClick={() =>
+                                handleScheduleAction(source.name, "cancel")
+                              }
+                              disabled={scheduleAction === `cancel-${source.name}`}
+                              className="flex items-center gap-1 text-[10px] tracking-widest text-white/20 hover:text-coral transition-colors uppercase disabled:opacity-50"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setSchedulingSource(source)}
+                            className="flex items-center gap-1 text-[10px] tracking-widest text-white/40 hover:text-coral transition-colors uppercase"
+                          >
+                            <Clock className="w-3 h-3" />
+                            Schedule
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
@@ -282,6 +380,25 @@ export default function AdminSourcesPage() {
           </footer>
         </div>
       </main>
+
+      {/* Schedule modal */}
+      {schedulingSource && (
+        <ScheduleModal
+          sourceName={schedulingSource.name}
+          sourceType={
+            schedulingSource.protocol === "rest_api"
+              ? (schedulingSource.service ?? "generic")
+              : schedulingSource.protocol
+          }
+          resourceType={schedulingSource.resource_type}
+          channelKey={schedulingSource.channel_key}
+          onClose={() => setSchedulingSource(null)}
+          onScheduled={() => {
+            setSchedulingSource(null);
+            fetchSchedules();
+          }}
+        />
+      )}
     </div>
   );
 }
